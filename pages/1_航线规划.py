@@ -1,13 +1,9 @@
 # pages/1_航线规划.py
 import streamlit as st
 import json
-from utils import gcj02_to_wgs84
 
-st.set_page_config(page_title="航线规划 - 高德3D地图", layout="wide")
-st.title("🗺️ 航线规划 (高德3D地图 + 障碍物)")
-
-# 高德地图 API Key（替换成你自己的）
-AMAP_KEY = "9bc3e8486433e66906e4112f9b69223b"
+st.set_page_config(page_title="航线规划 - 3D卫星地图", layout="wide")
+st.title("🗺️ 航线规划 (3D卫星地图 + 障碍物)")
 
 # 初始化会话状态
 if 'coord_type' not in st.session_state:
@@ -69,140 +65,231 @@ with st.sidebar:
         st.session_state.obstacles = []
         st.rerun()
 
-# 坐标转换：用户输入的坐标系 -> 高德API使用的GCJ-02
-def to_gcj02(lat, lng, input_type):
-    if input_type == "WGS-84":
-        from utils import wgs84_to_gcj02
-        lng_gcj, lat_gcj = wgs84_to_gcj02(lng, lat)
-        return lat_gcj, lng_gcj
+# 经纬度转 WGS-84（用户输入的坐标系可能为 GCJ-02）
+def to_wgs84(lat, lng, input_type):
+    if input_type == "GCJ-02":
+        from utils import gcj02_to_wgs84
+        wgs_lng, wgs_lat = gcj02_to_wgs84(lng, lat)
+        return wgs_lat, wgs_lng
     else:
         return lat, lng
 
-latA_gcj, lngA_gcj = to_gcj02(st.session_state.pointA["lat"], st.session_state.pointA["lng"], st.session_state.coord_type)
-latB_gcj, lngB_gcj = to_gcj02(st.session_state.pointB["lat"], st.session_state.pointB["lng"], st.session_state.coord_type)
+# 转换 A/B 点为 WGS84（MapLibre 默认使用 WGS84 经纬度）
+latA_w, lngA_w = to_wgs84(st.session_state.pointA["lat"], st.session_state.pointA["lng"], st.session_state.coord_type)
+latB_w, lngB_w = to_wgs84(st.session_state.pointB["lat"], st.session_state.pointB["lng"], st.session_state.coord_type)
 
-# 障碍物坐标也统一转为GCJ-02
-obstacles_gcj = []
+# 转换障碍物坐标
+obstacles_wgs = []
 for obs in st.session_state.obstacles:
-    lat_obs, lng_obs = to_gcj02(obs["lat"], obs["lng"], st.session_state.coord_type)
-    obstacles_gcj.append({
-        "lat": lat_obs, "lng": lng_obs,
+    lat_o, lng_o = to_wgs84(obs["lat"], obs["lng"], st.session_state.coord_type)
+    obstacles_wgs.append({
+        "lat": lat_o, "lng": lng_o,
         "radius": obs["radius"], "height": obs["height"]
     })
 
-# 计算地图中心点
-center_lat = (latA_gcj + latB_gcj) / 2
-center_lng = (lngA_gcj + lngB_gcj) / 2
-
-# 生成嵌入高德地图的 HTML（支持3D视角、倾斜、旋转）
+# 生成嵌入地图的 HTML（MapLibre GL JS + Esri 卫星影像）
 map_html = f"""
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <meta name="viewport" content="initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="initial-scale=1, user-scalable=no">
+    <title>3D 卫星航线规划</title>
     <style>
-        body, html {{ margin: 0; padding: 0; height: 100%; width: 100%; }}
-        #container {{ height: 100%; width: 100%; }}
+        body {{ margin: 0; padding: 0; }}
+        #map {{ position: absolute; top: 0; bottom: 0; width: 100%; height: 100%; }}
+        .controls-note {{
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0,0,0,0.6);
+            color: #ccc;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-family: sans-serif;
+            font-size: 12px;
+            z-index: 100;
+            pointer-events: none;
+        }}
     </style>
+    <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
+    <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
 </head>
 <body>
-    <div id="container"></div>
-    <script type="text/javascript"
-        src="https://webapi.amap.com/maps?v=2.0&key={AMAP_KEY}"></script>
+    <div id="map"></div>
+    <div class="controls-note">
+        🖱️ 鼠标拖拽旋转视角 | 右键拖拽平移 | 滚轮缩放 (3D 效果)
+    </div>
+
     <script>
-        // 创建地图
-        var map = new AMap.Map('container', {{
-            center: [{center_lng}, {center_lat}],
-            zoom: 17,
-            pitch: 60,          // 俯仰角（3D效果）
-            viewMode: '3D',     // 3D模式
-            rotation: 0,
-            resizeEnable: true
-        }});
-        
-        // 添加A点标记（绿色）
-        var markerA = new AMap.Marker({{
-            position: [{lngA_gcj}, {latA_gcj}],
-            title: '起点 A',
-            label: {{
-                content: '<div style="background: #2ecc71; color: white; padding: 4px 8px; border-radius: 4px;">A</div>',
-                offset: new AMap.Pixel(0, -25)
+        // 初始化地图 (使用 Esri 卫星影像，无需 API Key)
+        const map = new maplibregl.Map({{
+            container: 'map',
+            style: {{
+                version: 8,
+                sources: {{
+                    'esri-satellite': {{
+                        type: 'raster',
+                        tiles: ['https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}'],
+                        tileSize: 256,
+                        attribution: 'Esri & Contributors'
+                    }}
+                }},
+                layers: [{{
+                    id: 'satellite',
+                    type: 'raster',
+                    source: 'esri-satellite',
+                    minzoom: 0,
+                    maxzoom: 18
+                }}]
             }},
-            icon: 'https://webapi.amap.com/theme/v1.3/markers/n/mark_b.png'
+            center: [{(lngA_w + lngB_w)/2}, {(latA_w + latB_w)/2}],
+            zoom: 16,
+            pitch: 60,          // 倾斜角度 (3D 效果)
+            bearing: 0
         }});
-        map.add(markerA);
-        
-        // 添加B点标记（红色）
-        var markerB = new AMap.Marker({{
-            position: [{lngB_gcj}, {latB_gcj}],
-            title: '终点 B',
-            label: {{
-                content: '<div style="background: #e74c3c; color: white; padding: 4px 8px; border-radius: 4px;">B</div>',
-                offset: new AMap.Pixel(0, -25)
-            }},
-            icon: 'https://webapi.amap.com/theme/v1.3/markers/n/mark_r.png'
-        }});
-        map.add(markerB);
-        
-        // 绘制航线（蓝色折线）
-        var line = new AMap.Polyline({{
-            path: [[{lngA_gcj}, {latA_gcj}], [{lngB_gcj}, {latB_gcj}]],
-            strokeColor: '#3498db',
-            strokeWeight: 6,
-            strokeOpacity: 0.8,
-            strokeStyle: 'solid'
-        }});
-        map.add(line);
-        
-        // 添加障碍物（圆柱体效果：使用圆+多边形模拟，无法在3D中直接画圆柱，使用圆圈+半透明填充）
-        var obstacles = {json.dumps(obstacles_gcj)};
-        for (var i = 0; i < obstacles.length; i++) {{
-            var obs = obstacles[i];
-            var circle = new AMap.Circle({{
-                center: [obs.lng, obs.lat],
-                radius: obs.radius,
-                fillColor: '#f39c12',
-                fillOpacity: 0.4,
-                strokeColor: '#e67e22',
-                strokeOpacity: 0.8,
-                strokeWeight: 2
-            }});
-            circle.setMap(map);
-            // 添加文字标注显示高度
-            var text = new AMap.Text({{
-                text: '⚠️ 障碍物\\n高' + obs.height + 'm',
-                anchor: 'center',
-                position: [obs.lng, obs.lat],
-                style: {{
-                    'background-color': 'rgba(0,0,0,0.6)',
-                    'border': 'none',
-                    'color': 'white',
-                    'padding': '4px 8px',
-                    'font-size': '12px',
-                    'border-radius': '4px'
+
+        // 添加地形控制 (需要 Mapbox 地形服务 token 才能有真实地形，这里不加地形)
+        // 但依然保持 3D 视角
+
+        // 等待地图加载完成
+        map.on('load', () => {{
+            // 添加起点 A 标记 (绿色)
+            const aMarker = new maplibregl.Marker({{ color: '#2ecc71', scale: 1.2 }})
+                .setLngLat([{lngA_w}, {latA_w}])
+                .setPopup(new maplibregl.Popup().setHTML('<b>起点 A</b><br/>' + {latA_w:.6f} + ', ' + {lngA_w:.6f}))
+                .addTo(map);
+            
+            // 添加终点 B 标记 (红色)
+            const bMarker = new maplibregl.Marker({{ color: '#e74c3c', scale: 1.2 }})
+                .setLngLat([{lngB_w}, {latB_w}])
+                .setPopup(new maplibregl.Popup().setHTML('<b>终点 B</b><br/>' + {latB_w:.6f} + ', ' + {lngB_w:.6f}))
+                .addTo(map);
+            
+            // 绘制航线 (蓝色线条，带流动光点效果)
+            map.addSource('route', {{
+                type: 'geojson',
+                data: {{
+                    type: 'Feature',
+                    geometry: {{
+                        type: 'LineString',
+                        coordinates: [[{lngA_w}, {latA_w}], [{lngB_w}, {latB_w}]]
+                    }}
                 }}
             }});
-            text.setMap(map);
-        }}
+            
+            map.addLayer({{
+                id: 'route-line',
+                type: 'line',
+                source: 'route',
+                layout: {{
+                    'line-join': 'round',
+                    'line-cap': 'round'
+                }},
+                paint: {{
+                    'line-color': '#3498db',
+                    'line-width': 5,
+                    'line-opacity': 0.9,
+                    'line-dasharray': [2, 2]   // 虚线效果
+                }}
+            }});
+            
+            // 添加流动箭头效果 (使用 symbol 图层)
+            map.addLayer({{
+                id: 'route-arrows',
+                type: 'symbol',
+                source: 'route',
+                layout: {{
+                    'symbol-placement': 'line',
+                    'symbol-spacing': 80,
+                    'text-field': '▶',
+                    'text-size': 16,
+                    'text-rotate': 90,
+                    'text-color': '#ffffff'
+                }},
+                paint: {{
+                    'text-color': '#fff'
+                }}
+            }});
+            
+            // 添加障碍物 (3D 圆柱体，使用圆形图层 + 高度拉伸模拟，需要 fill-extrusion 或者使用自定义图层)
+            // 由于 fill-extrusion 需要多边形，这里简化为圆形标记 + 弹窗显示高度
+            const obstacles = {json.dumps(obstacles_wgs)};
+            obstacles.forEach(obs => {{
+                // 添加圆形障碍物区域 (半透明橙色)
+                map.addSource(`obs-${{obs.lng}}-${{obs.lat}}`, {{
+                    type: 'geojson',
+                    data: {{
+                        type: 'Feature',
+                        geometry: {{
+                            type: 'Point',
+                            coordinates: [obs.lng, obs.lat]
+                        }}
+                    }}
+                }});
+                map.addLayer({{
+                    id: `obs-circle-${{obs.lng}}-${{obs.lat}}`,
+                    type: 'circle',
+                    source: `obs-${{obs.lng}}-${{obs.lat}}`,
+                    paint: {{
+                        'circle-radius': obs.radius / 2,   // 缩放系数 (半径米转像素估算，此处简化)
+                        'circle-color': '#f39c12',
+                        'circle-opacity': 0.5,
+                        'circle-stroke-width': 2,
+                        'circle-stroke-color': '#e67e22'
+                    }}
+                }});
+                
+                // 添加弹窗显示高度
+                const popup = new maplibregl.Popup({{ offset: 25 }})
+                    .setHTML(`<div style="background:#000;color:#ffaa44;padding:4px;">⚠️ 障碍物<br/>高 ${{obs.height}} m</div>`);
+                const marker = new maplibregl.Marker({{ element: document.createElement('div') }})
+                    .setLngLat([obs.lng, obs.lat])
+                    .setPopup(popup)
+                    .addTo(map);
+            }});
+            
+            // 可选: 添加飞行高度标注 (在航线中点处)
+            const midLng = ({lngA_w} + {lngB_w}) / 2;
+            const midLat = ({latA_w} + {latB_w}) / 2;
+            const flightHeightDiv = document.createElement('div');
+            flightHeightDiv.innerHTML = `✈️ 飞行高度: {st.session_state.flight_height} m`;
+            flightHeightDiv.style.backgroundColor = 'rgba(0,0,0,0.7)';
+            flightHeightDiv.style.color = '#fff';
+            flightHeightDiv.style.padding = '4px 12px';
+            flightHeightDiv.style.borderRadius = '20px';
+            flightHeightDiv.style.fontSize = '14px';
+            flightHeightDiv.style.border = '1px solid #3498db';
+            new maplibregl.Marker({{ element: flightHeightDiv }})
+                .setLngLat([midLng, midLat])
+                .addTo(map);
+        }});
         
-        // 可选：添加测距工具或缩放控件
-        map.addControl(new AMap.ToolBar());
-        map.addControl(new AMap.Scale());
+        // 启用 3D 地形（可选，需要地形源）
+        // 如果有 Mapbox token，可以取消注释下面代码：
+        /*
+        map.on('load', () => {{
+            map.addSource('mapbox-dem', {{
+                type: 'raster-dem',
+                url: 'https://api.mapbox.com/v4/mapbox.mapbox-terrain-dem-v1/tiles/{z}/{x}/{y}.webp?access_token=YOUR_TOKEN',
+                tileSize: 512
+            }});
+            map.setTerrain({{ source: 'mapbox-dem', exaggeration: 1.5 }});
+        }});
+        */
     </script>
 </body>
 </html>
 """
 
-# 嵌入HTML地图（宽度100%，高度600px）
-st.components.v1.html(map_html, height=600, scrolling=False)
+# 嵌入地图（高度 700px）
+st.components.v1.html(map_html, height=700, scrolling=False)
 
-# 显示规划数据
+# 显示当前规划数据
 st.subheader("当前规划数据")
 colA, colB, colH = st.columns(3)
 colA.metric("起点 A", f"({st.session_state.pointA['lat']:.6f}, {st.session_state.pointA['lng']:.6f})")
 colB.metric("终点 B", f"({st.session_state.pointB['lat']:.6f}, {st.session_state.pointB['lng']:.6f})")
 colH.metric("飞行高度", f"{st.session_state.flight_height} 米")
-st.caption(f"输入坐标系: {st.session_state.coord_type}  →  地图显示已自动转换至GCJ-02（高德）")
-st.info("💡 提示：地图支持鼠标拖拽旋转视角（按住右键拖动）、滚轮缩放。橙色圆形区域为障碍物。")
+st.caption(f"输入坐标系: {st.session_state.coord_type}  →  地图显示已自动转换至WGS-84")
+st.info("💡 提示：地图使用 Esri World Imagery 卫星影像，支持 3D 倾斜视角（鼠标拖拽旋转）。橙色圆形区域为障碍物，蓝色虚线为航线。")
