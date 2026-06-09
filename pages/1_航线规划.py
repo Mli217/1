@@ -27,52 +27,45 @@ if 'last_save_time' not in st.session_state:
 if 'pending_polygon' not in st.session_state:
     st.session_state.pending_polygon = None
 
-# ==================== 坐标转换函数 ====================
+# ==================== 坐标转换（增加异常防护） ====================
 def to_wgs84(lat, lng, input_type):
     if input_type == "GCJ-02":
         try:
             wgs_lng, wgs_lat = gcj02_to_wgs84(lng, lat)
             return wgs_lat, wgs_lng
-        except Exception as e:
-            # 如果坐标系转换失败（如utils缺失），直接返回原始坐标以防地图崩溃
-            print(f"坐标转换失败: {e}")
-            return lat, lng
+        except Exception:
+            return lat, lng  # 转换失败直接返回原值，防止地图崩溃
     else:
         return lat, lng
 
-# ==================== 布局设定（左3列 右1.5列） ====================
-left_col, right_col = st.columns([3, 1.5])
+# ==================== 布局：左侧地图放大 ====================
+# 左侧 4 份，右侧 1 份，地图占比更大
+left_col, right_col = st.columns([4, 1])
 
-# ==================== 右侧控制面板（所有功能整合在此） ====================
+# ==================== 右侧控制面板 ====================
 with right_col:
     st.subheader("🎮 控制面板")
     
-    # 坐标类型选择
     coord_type_option = st.radio("输入坐标系", ["WGS-84", "GCJ-02 (高德/百度)"],
                                  index=0 if st.session_state.coord_type == "WGS-84" else 1)
     st.session_state.coord_type = coord_type_option.split()[0]
     
-    # 起点 A 设置
     st.subheader("起点 A")
     col1, col2 = st.columns(2)
     latA_input = col1.number_input("纬度", value=st.session_state.pointA["lat"], format="%.6f", key="latA")
     lngA_input = col2.number_input("经度", value=st.session_state.pointA["lng"], format="%.6f", key="lngA")
     if st.button("📍 设置A点", use_container_width=True):
         st.session_state.pointA = {"lat": latA_input, "lng": lngA_input}
-        st.success(f"A点已设: ({latA_input}, {lngA_input})")
         st.rerun()
     
-    # 终点 B 设置
     st.subheader("终点 B")
     col3, col4 = st.columns(2)
     latB_input = col3.number_input("纬度", value=st.session_state.pointB["lat"], format="%.6f", key="latB")
     lngB_input = col4.number_input("经度", value=st.session_state.pointB["lng"], format="%.6f", key="lngB")
     if st.button("📍 设置B点", use_container_width=True):
         st.session_state.pointB = {"lat": latB_input, "lng": lngB_input}
-        st.success(f"B点已设: ({latB_input}, {lngB_input})")
         st.rerun()
     
-    # 飞行参数
     st.subheader("✈️ 飞行参数")
     height_input = st.number_input("设定飞行高度 (m)", min_value=10, max_value=500,
                                    value=st.session_state.flight_height, step=5)
@@ -80,16 +73,13 @@ with right_col:
 
     st.divider()
     
-    # ===== 障碍物配置持久化（完全复刻截图） =====
+    # 障碍物持久化
     st.subheader("🚧 障碍物配置持久化")
-    st.caption("配置文件：`C:\\Users\\77463\\obstacle_config.json` | 版本：v12.2")
+    st.caption("配置文件：`obstacle_config.json` | 版本：v12.2")
     
-    # 按钮行
-    col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
-    
-    # 保存
+    col_btn1, col_btn2 = st.columns(2)
     with col_btn1:
-        if st.button("💾 保存到文件", type="primary", use_container_width=True):
+        if st.button("💾 保存", type="primary", use_container_width=True):
             config = {
                 "version": "v12.2",
                 "save_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -104,9 +94,6 @@ with right_col:
                 use_container_width=True
             )
             st.session_state.last_save_time = config["save_time"]
-            st.success("已生成文件")
-    
-    # 加载
     with col_btn2:
         uploaded_file = st.file_uploader("📂 加载", type=["json"], label_visibility="collapsed")
         if uploaded_file is not None:
@@ -114,28 +101,23 @@ with right_col:
                 config = json.load(uploaded_file)
                 st.session_state.polygon_obstacles = config.get("obstacles", [])
                 st.session_state.last_save_time = config.get("save_time", None)
-                st.success(f"已加载 {len(st.session_state.polygon_obstacles)} 个")
                 st.rerun()
             except Exception as e:
                 st.error(f"加载失败: {e}")
     
-    # 清除
+    col_btn3, col_btn4 = st.columns(2)
     with col_btn3:
-        if st.button("🗑️ 清除", use_container_width=True):
+        if st.button("🗑️ 清除全部", use_container_width=True):
             st.session_state.polygon_obstacles = []
             st.session_state.last_save_time = None
-            st.success("已清除全部")
             st.rerun()
-
-    # 一键部署按钮（仿照截图）
-    if st.button("⚡ 一键部署", type="primary", use_container_width=True):
-        st.success("🚀 一键部署执行中... (模拟)")
-
+    with col_btn4:
+        if st.button("⚡ 一键部署", type="primary", use_container_width=True):
+            st.success("🚀 一键部署执行中... (模拟)")
+    
     st.divider()
-
-    # 文件下载区
-    st.markdown("#### 📥 下载配置文件到本地")
-    st.markdown("点击下载即可将云端保存的障碍物配置保存到你的电脑")
+    
+    st.markdown("#### 📥 下载配置文件")
     if st.session_state.polygon_obstacles:
         config_download = {
             "version": "v12.2",
@@ -150,17 +132,16 @@ with right_col:
             use_container_width=True
         )
     else:
-        st.button("⬇️ 下载 (当前无障碍物)", disabled=True, use_container_width=True)
+        st.button("⬇️ 下载 (暂无数据)", disabled=True, use_container_width=True)
     
-    # 文件状态信息框（截图样式）
     status_text = f"📂 文件状态：共 {len(st.session_state.polygon_obstacles)} 个障碍物"
     if st.session_state.last_save_time:
-        status_text += f" | 保存时间：{st.session_state.last_save_time} | 版本：v12.2"
+        status_text += f" | 保存时间：{st.session_state.last_save_time}"
     st.info(status_text)
 
-    # 处理新添加的多边形（绘制后显示）
+    # 新障碍物表单
     if st.session_state.pending_polygon is not None:
-        st.warning("📍 检测到新绘制多边形！")
+        st.warning("📍 检测到新绘制多边形")
         with st.form(key="add_obs_form"):
             obs_name = st.text_input("障碍物名称", "新障碍物")
             obs_height = st.number_input("高度 (m)", min_value=10, max_value=200, value=40, step=5)
@@ -172,11 +153,9 @@ with right_col:
                 }
                 st.session_state.polygon_obstacles.append(new_obs)
                 st.session_state.pending_polygon = None
-                st.success("已添加")
                 st.rerun()
 
-    # 障碍物列表
-    with st.expander("📋 当前障碍物列表"):
+    with st.expander("📋 障碍物列表"):
         if st.session_state.polygon_obstacles:
             for i, obs in enumerate(st.session_state.polygon_obstacles):
                 pts = len(obs["coordinates"])
@@ -184,20 +163,27 @@ with right_col:
         else:
             st.write("暂无障碍物")
 
-# ==================== 左侧地图（核心与绘图） ====================
+# ==================== 左侧地图（超级大） ====================
 with left_col:
-    # 转换坐标
-    latA_w, lngA_w = to_wgs84(st.session_state.pointA["lat"], st.session_state.pointA["lng"], st.session_state.coord_type)
-    latB_w, lngB_w = to_wgs84(st.session_state.pointB["lat"], st.session_state.pointB["lng"], st.session_state.coord_type)
+    # 坐标转换
+    try:
+        latA_w, lngA_w = to_wgs84(st.session_state.pointA["lat"], st.session_state.pointA["lng"], st.session_state.coord_type)
+        latB_w, lngB_w = to_wgs84(st.session_state.pointB["lat"], st.session_state.pointB["lng"], st.session_state.coord_type)
+    except Exception:
+        latA_w, lngA_w = 32.2322, 118.749
+        latB_w, lngB_w = 32.2343, 118.749
     
-    # 地图中心
+    # 地图中心（异常防护）
     center_lat = (latA_w + latB_w) / 2
     center_lng = (lngA_w + lngB_w) / 2
+    # 如果有无效坐标，强制用默认中心
+    if not (-90 <= center_lat <= 90) or not (-180 <= center_lng <= 180):
+        center_lat, center_lng = 32.233, 118.749
     
     # 构建地图
     m = folium.Map(location=[center_lat, center_lng], zoom_start=16, control_scale=True)
     
-    # 绘制 A/B 点
+    # A/B 点
     folium.Marker([latA_w, lngA_w], popup=f"起点 A<br>{latA_w:.6f}, {lngA_w:.6f}",
                   icon=folium.Icon(color="green", icon="play", prefix="fa")).add_to(m)
     folium.Marker([latB_w, lngB_w], popup=f"终点 B<br>{latB_w:.6f}, {lngB_w:.6f}",
@@ -207,15 +193,14 @@ with left_col:
     folium.PolyLine([(latA_w, lngA_w), (latB_w, lngB_w)],
                     color="blue", weight=5, opacity=0.8, dash_array="5, 10").add_to(m)
     
-    # 绘制已存的障碍物
+    # 障碍物
     for obs in st.session_state.polygon_obstacles:
         coords = obs["coordinates"]
-        poly_coords = [[c[1], c[0]] for c in coords]  # [lng, lat] -> [lat, lng]
+        poly_coords = [[c[1], c[0]] for c in coords]
         height = obs.get("height", 40)
         folium.Polygon(locations=poly_coords, color="orange", fill=True,
                        fill_color="orange", fill_opacity=0.3, weight=3,
                        popup=f"高度: {height}m").add_to(m)
-        # 中心文字
         cx = sum(c[0] for c in coords) / len(coords)
         cy = sum(c[1] for c in coords) / len(coords)
         folium.Marker([cy, cx], icon=folium.DivIcon(
@@ -237,36 +222,37 @@ with left_col:
     ).add_to(m)
     MousePosition().add_to(m)
     
-    # ✅ 防止地图空白的关键修复：限制自动边界调整范围 + 检查坐标有效性
-    all_points = [[latA_w, lngA_w], [latB_w, lngB_w]]
+    # 自动适配边界（防崩溃）
+    all_points = []
+    if (-90 <= latA_w <= 90) and (-180 <= lngA_w <= 180):
+        all_points.append([latA_w, lngA_w])
+    if (-90 <= latB_w <= 90) and (-180 <= lngB_w <= 180):
+        all_points.append([latB_w, lngB_w])
     for obs in st.session_state.polygon_obstacles:
         for coord in obs["coordinates"]:
-            # 确保坐标有效
             if isinstance(coord, (list, tuple)) and len(coord) == 2:
-                all_points.append([coord[1], coord[0]])
+                lat, lng = coord[1], coord[0]
+                if (-90 <= lat <= 90) and (-180 <= lng <= 180):
+                    all_points.append([lat, lng])
+    if len(all_points) > 1:
+        try:
+            m.fit_bounds([
+                [min(p[0] for p in all_points), min(p[1] for p in all_points)],
+                [max(p[0] for p in all_points), max(p[1] for p in all_points)]
+            ])
+        except Exception:
+            pass
     
-    if all_points:
-        # 过滤掉 None 值
-        valid_points = [p for p in all_points if p[0] is not None and p[1] is not None]
-        if valid_points and len(valid_points) > 1:
-            try:
-                m.fit_bounds([
-                    [min(p[0] for p in valid_points), min(p[1] for p in valid_points)],
-                    [max(p[0] for p in valid_points), max(p[1] for p in valid_points)]
-                ])
-            except Exception:
-                pass  # 如果坐标异常，直接跳过自动适配，地图依然会显示在默认中心
+    # ✅ 地图渲染：超高 + 全宽
+    output = st_folium(m, height=800, use_container_width=True, key="map_key", returned_objects=["last_draw"])
     
-    # 显示地图，并捕获绘制动作
-    output = st_folium(m, height=550, key="map_key", returned_objects=["last_draw"])
-    
-    # 捕获新绘制多边形
+    # 捕获绘图事件（但不频繁刷新）
     if output and output.get("last_draw") and output["last_draw"].get("geometry"):
         geom = output["last_draw"]["geometry"]
         if geom["type"] == "Polygon":
             coords = geom["coordinates"][0]
             st.session_state.pending_polygon = coords
-            st.rerun()  # 刷新页面，此时右侧会弹出表单，地图状态会被保留
+            st.rerun()  # 唯一触发刷新的地方，不影响地图渲染
 
 # ==================== 底部数据显示 ====================
 st.divider()
@@ -276,3 +262,4 @@ c1.metric("起点 A", f"({st.session_state.pointA['lat']:.6f}, {st.session_state
 c2.metric("终点 B", f"({st.session_state.pointB['lat']:.6f}, {st.session_state.pointB['lng']:.6f})")
 c3.metric("飞行高度", f"{st.session_state.flight_height} 米")
 st.caption(f"输入坐标系: {st.session_state.coord_type}  →  地图显示已自动转换至WGS-84")
+st.info("💡 在左侧绘制多边形后，右侧会弹出确认框。所有障碍物可保存/加载 JSON 文件。")
