@@ -2,8 +2,8 @@
 import streamlit as st
 import json
 
-st.set_page_config(page_title="航线规划 - 3D卫星地图", layout="wide")
-st.title("🗺️ 航线规划 (3D卫星地图 + 障碍物)")
+st.set_page_config(page_title="航线规划 - 3D地图", layout="wide")
+st.title("🗺️ 航线规划 (3D地图 + 障碍物)")
 
 # 初始化会话状态
 if 'coord_type' not in st.session_state:
@@ -65,7 +65,7 @@ with st.sidebar:
         st.session_state.obstacles = []
         st.rerun()
 
-# 坐标转换函数
+# 坐标转换（WGS-84 ↔ GCJ-02）
 def to_wgs84(lat, lng, input_type):
     if input_type == "GCJ-02":
         try:
@@ -78,11 +78,9 @@ def to_wgs84(lat, lng, input_type):
     else:
         return lat, lng
 
-# 转换 A/B 点
 latA_w, lngA_w = to_wgs84(st.session_state.pointA["lat"], st.session_state.pointA["lng"], st.session_state.coord_type)
 latB_w, lngB_w = to_wgs84(st.session_state.pointB["lat"], st.session_state.pointB["lng"], st.session_state.coord_type)
 
-# 转换障碍物
 obstacles_wgs = []
 for obs in st.session_state.obstacles:
     lat_o, lng_o = to_wgs84(obs["lat"], obs["lng"], st.session_state.coord_type)
@@ -91,14 +89,14 @@ for obs in st.session_state.obstacles:
         "radius": obs["radius"], "height": obs["height"]
     })
 
-# 生成 HTML 地图（修正版，移除所有未定义变量）
+# 生成 HTML（使用 OpenStreetMap 瓦片，稳定可靠）
 map_html = f"""
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="initial-scale=1, user-scalable=no">
-    <title>3D 卫星航线规划</title>
+    <title>3D 航线规划</title>
     <style>
         body {{ margin: 0; padding: 0; }}
         #map {{ position: absolute; top: 0; bottom: 0; width: 100%; height: 100%; }}
@@ -124,26 +122,26 @@ map_html = f"""
     <div class="controls-note">
         🖱️ 鼠标拖拽旋转视角 | 右键拖拽平移 | 滚轮缩放 (3D 效果)
     </div>
-
     <script>
+        // 使用 OpenStreetMap 标准瓦片 (稳定，无需注册)
         const map = new maplibregl.Map({{
             container: 'map',
             style: {{
                 version: 8,
                 sources: {{
-                    'esri-satellite': {{
+                    'osm': {{
                         type: 'raster',
-                        tiles: ['https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}'],
+                        tiles: ['https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png'],
                         tileSize: 256,
-                        attribution: 'Esri & Contributors'
+                        attribution: '© OpenStreetMap contributors'
                     }}
                 }},
                 layers: [{{
-                    id: 'satellite',
+                    id: 'osm-layer',
                     type: 'raster',
-                    source: 'esri-satellite',
+                    source: 'osm',
                     minzoom: 0,
-                    maxzoom: 18
+                    maxzoom: 19
                 }}]
             }},
             center: [{(lngA_w + lngB_w)/2}, {(latA_w + latB_w)/2}],
@@ -165,7 +163,7 @@ map_html = f"""
                 .setPopup(new maplibregl.Popup().setHTML('<b>终点 B</b><br/>' + {latB_w:.6f} + ', ' + {lngB_w:.6f}))
                 .addTo(map);
             
-            // 航线数据
+            // 航线（虚线）
             map.addSource('route', {{
                 type: 'geojson',
                 data: {{
@@ -190,7 +188,7 @@ map_html = f"""
                 }}
             }});
             
-            // 障碍物
+            // 障碍物（圆形）
             const obstacles = {json.dumps(obstacles_wgs)};
             obstacles.forEach(obs => {{
                 map.addSource(`obs-${{obs.lng}}-${{obs.lat}}`, {{
@@ -224,7 +222,7 @@ map_html = f"""
                     .addTo(map);
             }});
             
-            // 飞行高度标注
+            // 飞行高度标注（中点）
             const midLng = ({lngA_w} + {lngB_w}) / 2;
             const midLat = ({latA_w} + {latB_w}) / 2;
             const div = document.createElement('div');
@@ -252,4 +250,4 @@ colA.metric("起点 A", f"({st.session_state.pointA['lat']:.6f}, {st.session_sta
 colB.metric("终点 B", f"({st.session_state.pointB['lat']:.6f}, {st.session_state.pointB['lng']:.6f})")
 colH.metric("飞行高度", f"{st.session_state.flight_height} 米")
 st.caption(f"输入坐标系: {st.session_state.coord_type}  →  地图显示已自动转换至WGS-84")
-st.info("💡 提示：使用 Esri 卫星影像，3D 视角可拖拽旋转。橙色圆点为障碍物，蓝色虚线为航线。")
+st.info("💡 提示：使用 OpenStreetMap 底图，稳定可靠。3D 视角可拖拽旋转。橙色圆点为障碍物，蓝色虚线为航线。")
