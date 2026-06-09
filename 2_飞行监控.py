@@ -4,7 +4,7 @@ import pandas as pd
 import datetime
 from streamlit_autorefresh import st_autorefresh
 
-st.set_page_config(page_title="飞行监控", layout="wide")
+# st.set_page_config(page_title="飞行监控", layout="wide")
 st.title("📡 飞行监控 - 无人机心跳监测")
 
 if 'heartbeat_data' not in st.session_state:
