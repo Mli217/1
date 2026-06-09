@@ -1,3 +1,4 @@
+# pages/1_航线规划.py
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
@@ -10,7 +11,7 @@ st.set_page_config(page_title="航线规划 - 3D地图", layout="wide")
 st.title("🗺️ 航线规划 (3D地图 + 多边形障碍物圈选)")
 
 # ==================== 坐标转换（防崩溃） ====================
-# 如果之前 utils 里有 gcj02_to_wgs84，这里依然调用；如果没有，自动返回原值。
+# 如果你有 utils 文件就启用，没有则自动跳过
 try:
     from utils import gcj02_to_wgs84
     def to_wgs84(lat, lng, input_type):
@@ -23,7 +24,6 @@ try:
         else:
             return lat, lng
 except ImportError:
-    # 如果没有 utils 模块，直接用原坐标
     def to_wgs84(lat, lng, input_type):
         return lat, lng
 
@@ -44,28 +44,45 @@ if 'pending_polygon' not in st.session_state:
     st.session_state.pending_polygon = None
 
 # ==================== 左侧：地图区域 ====================
-left_col, right_col = st.columns([4, 1])
+left_col, right_col = st.columns([3.5, 1.2])
 
 with left_col:
     # 坐标转换
     latA_w, lngA_w = to_wgs84(st.session_state.pointA["lat"], st.session_state.pointA["lng"], st.session_state.coord_type)
     latB_w, lngB_w = to_wgs84(st.session_state.pointB["lat"], st.session_state.pointB["lng"], st.session_state.coord_type)
 
-    # 地图中心（防越界）
+    # 地图中心点（防越界）
     center_lat = (latA_w + latB_w) / 2
     center_lng = (lngA_w + lngB_w) / 2
     if not (-90 <= center_lat <= 90) or not (-180 <= center_lng <= 180):
         center_lat, center_lng = 32.233, 118.749
 
-    # ✅ 创建地图（使用高德瓦片，国内加载最快）
-    m = folium.Map(location=[center_lat, center_lng], zoom_start=16, control_scale=True)
-    folium.TileLayer(
-        tiles='http://webrd02.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
-        attr='高德地图',
-        name='高德地图',
-        overlay=True,
-        control=True
-    ).add_to(m)
+    # ✅ 【核心修改】根据坐标类型切换地图底图
+    if st.session_state.coord_type == "GCJ-02":
+        # ===== GCJ-02 模式：高德卫星图 + 3D 倾斜视角 =====
+        m = folium.Map(
+            location=[center_lat, center_lng],
+            zoom_start=16,
+            control_scale=True,
+            pitch=60,      # 倾斜角度，让地图看起来是 3D 立体
+            bearing=0      # 旋转角度
+        )
+        folium.TileLayer(
+            tiles='http://webst01.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=7&x={x}&y={y}&z={z}',
+            attr='高德卫星',
+            name='高德卫星地图',
+            overlay=True,
+            control=True
+        ).add_to(m)
+    else:
+        # ===== WGS-84 模式：普通街道地图（2D） =====
+        m = folium.Map(
+            location=[center_lat, center_lng],
+            zoom_start=16,
+            control_scale=True,
+            tiles='http://webrd02.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
+            attr='高德地图'
+        )
 
     # A/B 点
     folium.Marker([latA_w, lngA_w], popup=f"起点 A<br>{latA_w:.6f}, {lngA_w:.6f}",
@@ -127,8 +144,8 @@ with left_col:
         except:
             pass
 
-    # 🚀 渲染地图
-    output = st_folium(m, height=750, use_container_width=True, key="map_key", returned_objects=["last_draw"])
+    # 🚀 渲染地图（高度加大）
+    output = st_folium(m, height=800, use_container_width=True, key="map_key", returned_objects=["last_draw"])
 
     # 捕获新绘制多边形
     if output and output.get("last_draw") and output["last_draw"].get("geometry"):
@@ -267,4 +284,4 @@ c1.metric("起点 A", f"({st.session_state.pointA['lat']:.6f}, {st.session_state
 c2.metric("终点 B", f"({st.session_state.pointB['lat']:.6f}, {st.session_state.pointB['lng']:.6f})")
 c3.metric("飞行高度", f"{st.session_state.flight_height} 米")
 st.caption(f"输入坐标系: {st.session_state.coord_type}")
-st.info("💡 在地图上绘制多边形后，右侧会弹出确认框。所有障碍物可保存/加载 JSON 文件。")
+st.info("💡 选择 GCJ-02 坐标系时自动切换为卫星 3D 视角；选择 WGS-84 时切换为普通街道地图。在地图绘制多边形后，右侧会弹出确认框。")
