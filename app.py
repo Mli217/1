@@ -3,8 +3,9 @@ import streamlit as st
 
 st.set_page_config(page_title="无人机智能规划系统", layout="wide")
 
+# 侧边栏修饰样式（带小图标）
 st.sidebar.title("🗺️ 导航")
-st.sidebar.markdown("请从侧边栏选择功能页面")
+st.sidebar.markdown("📌 功能页面")
 
 st.title("无人机智能化应用系统")
 st.markdown("## 功能模块")
