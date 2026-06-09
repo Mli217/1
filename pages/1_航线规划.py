@@ -15,7 +15,9 @@ if "running" not in st.session_state:
 
 if page == "航线规划":
     st.header("🗺️ 航线规划")
-    map_area, ctrl_area = st.columns([3, 1])
+    # 1️⃣ 修改这里：左侧占比加大，右侧缩小
+    map_area, ctrl_area = st.columns([4, 1])
+    
     with ctrl_area:
         st.subheader("坐标系设置")
         coord_type = st.radio("输入坐标系", ["WGS-84", "GCJ-02(高德/百度)"], index=0)
@@ -52,7 +54,8 @@ if page == "航线规划":
         # 直接渲染点位，无转换偏移
         folium.Marker([lat_a, lon_a], popup="起点A（校园湖边）", icon=folium.Icon(color="red")).add_to(m)
         folium.Marker([lat_b, lon_b], popup="终点B（校园操场）", icon=folium.Icon(color="green")).add_to(m)
-        st_folium(m, width=720, height=520)
+        # 2️⃣ 修改这里：高度拉高、宽度自动撑满容器
+        st_folium(m, use_container_width=True, height=800)
 
 elif page == "飞行监控":
     st.header("📡 实时心跳包序号与时间变化")
