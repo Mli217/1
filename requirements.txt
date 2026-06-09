@@ -1,5 +1,5 @@
 streamlit
 pandas
 streamlit-autorefresh
-pydeck
+pydeck>=0.8.0
 numpy
