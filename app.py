@@ -7,7 +7,7 @@ st.set_page_config(page_title="无人机智能规划系统", layout="wide")
 with st.sidebar:
     st.title("🗺️ 导航")
     st.markdown("📌 功能页面")
-    st.page_link("1.航线规划.py", label="航线规划", icon="📍")
+    st.page_link("1_航线规划.py", label="航线规划", icon="📍")
     st.page_link("2_飞行监控.py", label="飞行监控", icon="📡")
 
 st.title("无人机智能化应用系统")
