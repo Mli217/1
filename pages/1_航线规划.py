@@ -5,7 +5,9 @@ from streamlit_folium import st_folium
 from folium.plugins import Draw, MousePosition
 import json
 import datetime
-from utils import gcj02_to_wgs84
+import sys
+# 注意：注释掉了 utils 导入，我们手动做坐标转换或直接跳过
+# from utils import gcj02_to_wgs84
 
 st.set_page_config(page_title="航线规划 - 3D地图", layout="wide")
 
@@ -13,7 +15,7 @@ st.title("🗺️ 航线规划 (3D地图 + 多边形障碍物圈选)")
 
 # ==================== 初始化会话状态 ====================
 if 'coord_type' not in st.session_state:
-    st.session_state.coord_type = "GCJ-02"
+    st.session_state.coord_type = "WGS-84"  # 默认改为 WGS-84 避免 GCJ-02 转换异常
 if 'pointA' not in st.session_state:
     st.session_state.pointA = {"lat": 32.2322, "lng": 118.749}
 if 'pointB' not in st.session_state:
@@ -27,23 +29,13 @@ if 'last_save_time' not in st.session_state:
 if 'pending_polygon' not in st.session_state:
     st.session_state.pending_polygon = None
 
-# ==================== 坐标转换（增加异常防护） ====================
+# ==================== 坐标转换（临时完全跳过，避免报错） ====================
 def to_wgs84(lat, lng, input_type):
-    if input_type == "GCJ-02":
-        try:
-            wgs_lng, wgs_lat = gcj02_to_wgs84(lng, lat)
-            return wgs_lat, wgs_lng
-        except Exception:
-            return lat, lng  # 转换失败直接返回原值，防止地图崩溃
-    else:
-        return lat, lng
-
-# ==================== 布局：左侧地图放大 ====================
-# 左侧 4 份，右侧 1 份，地图占比更大
-left_col, right_col = st.columns([4, 1])
+    # ✅ 不管什么坐标系，直接返回原始值，保证地图能加载
+    return lat, lng
 
 # ==================== 右侧控制面板 ====================
-with right_col:
+with st.sidebar:
     st.subheader("🎮 控制面板")
     
     coord_type_option = st.radio("输入坐标系", ["WGS-84", "GCJ-02 (高德/百度)"],
@@ -163,96 +155,73 @@ with right_col:
         else:
             st.write("暂无障碍物")
 
-# ==================== 左侧地图（超级大） ====================
-with left_col:
-    # 坐标转换
-    try:
-        latA_w, lngA_w = to_wgs84(st.session_state.pointA["lat"], st.session_state.pointA["lng"], st.session_state.coord_type)
-        latB_w, lngB_w = to_wgs84(st.session_state.pointB["lat"], st.session_state.pointB["lng"], st.session_state.coord_type)
-    except Exception:
-        latA_w, lngA_w = 32.2322, 118.749
-        latB_w, lngB_w = 32.2343, 118.749
-    
-    # 地图中心（异常防护）
-    center_lat = (latA_w + latB_w) / 2
-    center_lng = (lngA_w + lngB_w) / 2
-    # 如果有无效坐标，强制用默认中心
-    if not (-90 <= center_lat <= 90) or not (-180 <= center_lng <= 180):
-        center_lat, center_lng = 32.233, 118.749
-    
-    # 构建地图
-    m = folium.Map(location=[center_lat, center_lng], zoom_start=16, control_scale=True)
-    
-    # A/B 点
-    folium.Marker([latA_w, lngA_w], popup=f"起点 A<br>{latA_w:.6f}, {lngA_w:.6f}",
-                  icon=folium.Icon(color="green", icon="play", prefix="fa")).add_to(m)
-    folium.Marker([latB_w, lngB_w], popup=f"终点 B<br>{latB_w:.6f}, {lngB_w:.6f}",
-                  icon=folium.Icon(color="red", icon="stop", prefix="fa")).add_to(m)
-    
-    # 航线
-    folium.PolyLine([(latA_w, lngA_w), (latB_w, lngB_w)],
-                    color="blue", weight=5, opacity=0.8, dash_array="5, 10").add_to(m)
-    
-    # 障碍物
-    for obs in st.session_state.polygon_obstacles:
-        coords = obs["coordinates"]
-        poly_coords = [[c[1], c[0]] for c in coords]
-        height = obs.get("height", 40)
-        folium.Polygon(locations=poly_coords, color="orange", fill=True,
-                       fill_color="orange", fill_opacity=0.3, weight=3,
-                       popup=f"高度: {height}m").add_to(m)
-        cx = sum(c[0] for c in coords) / len(coords)
-        cy = sum(c[1] for c in coords) / len(coords)
-        folium.Marker([cy, cx], icon=folium.DivIcon(
-            html=f'<div style="background:rgba(0,0,0,0.7); color:orange; padding:2px 6px; border-radius:12px;">{height}m</div>')).add_to(m)
-    
-    # 飞行高度标注
-    mid_lat = (latA_w + latB_w) / 2
-    mid_lng = (lngA_w + lngB_w) / 2
-    folium.Marker([mid_lat, mid_lng], icon=folium.DivIcon(
-        html=f'<div style="background:rgba(0,0,0,0.6); color:white; padding:4px 12px; border-radius:20px; border:1px solid #3498db;">✈️ 飞行高度: {st.session_state.flight_height} m</div>')).add_to(m)
-    
-    # 绘图工具
-    Draw(
-        draw_options={
-            "polygon": {"shapeOptions": {"color": "#f39c12"}, "allowIntersection": False},
-            "polyline": False, "rectangle": False, "circle": False, "circlemarker": False, "marker": False
-        },
-        edit_options={"edit": True, "remove": True}
-    ).add_to(m)
-    MousePosition().add_to(m)
-    
-    # 自动适配边界（防崩溃）
-    all_points = []
-    if (-90 <= latA_w <= 90) and (-180 <= lngA_w <= 180):
-        all_points.append([latA_w, lngA_w])
-    if (-90 <= latB_w <= 90) and (-180 <= lngB_w <= 180):
-        all_points.append([latB_w, lngB_w])
-    for obs in st.session_state.polygon_obstacles:
-        for coord in obs["coordinates"]:
-            if isinstance(coord, (list, tuple)) and len(coord) == 2:
-                lat, lng = coord[1], coord[0]
-                if (-90 <= lat <= 90) and (-180 <= lng <= 180):
-                    all_points.append([lat, lng])
-    if len(all_points) > 1:
-        try:
-            m.fit_bounds([
-                [min(p[0] for p in all_points), min(p[1] for p in all_points)],
-                [max(p[0] for p in all_points), max(p[1] for p in all_points)]
-            ])
-        except Exception:
-            pass
-    
-    # ✅ 地图渲染：超高 + 全宽
-    output = st_folium(m, height=800, use_container_width=True, key="map_key", returned_objects=["last_draw"])
-    
-    # 捕获绘图事件（但不频繁刷新）
-    if output and output.get("last_draw") and output["last_draw"].get("geometry"):
-        geom = output["last_draw"]["geometry"]
-        if geom["type"] == "Polygon":
-            coords = geom["coordinates"][0]
-            st.session_state.pending_polygon = coords
-            st.rerun()  # 唯一触发刷新的地方，不影响地图渲染
+# ==================== 地图放在主区域（左侧宽大） ====================
+# ✅ 这是修复地图空白的核心：直接渲染在主区域，不放入任何列
+# 坐标直接使用 WGS-84，不用转换
+latA_w, lngA_w = st.session_state.pointA["lat"], st.session_state.pointA["lng"]
+latB_w, lngB_w = st.session_state.pointB["lat"], st.session_state.pointB["lng"]
+
+# 地图中心
+center_lat = (latA_w + latB_w) / 2
+center_lng = (lngA_w + lngB_w) / 2
+
+# 构建地图
+m = folium.Map(location=[center_lat, center_lng], zoom_start=16, control_scale=True)
+
+# A/B 点
+folium.Marker([latA_w, lngA_w], popup=f"起点 A<br>{latA_w:.6f}, {lngA_w:.6f}",
+              icon=folium.Icon(color="green", icon="play", prefix="fa")).add_to(m)
+folium.Marker([latB_w, lngB_w], popup=f"终点 B<br>{latB_w:.6f}, {lngB_w:.6f}",
+              icon=folium.Icon(color="red", icon="stop", prefix="fa")).add_to(m)
+
+# 航线
+folium.PolyLine([(latA_w, lngA_w), (latB_w, lngB_w)],
+                color="blue", weight=5, opacity=0.8, dash_array="5, 10").add_to(m)
+
+# 障碍物
+for obs in st.session_state.polygon_obstacles:
+    coords = obs["coordinates"]
+    poly_coords = [[c[1], c[0]] for c in coords]
+    height = obs.get("height", 40)
+    folium.Polygon(locations=poly_coords, color="orange", fill=True,
+                   fill_color="orange", fill_opacity=0.3, weight=3,
+                   popup=f"高度: {height}m").add_to(m)
+    cx = sum(c[0] for c in coords) / len(coords)
+    cy = sum(c[1] for c in coords) / len(coords)
+    folium.Marker([cy, cx], icon=folium.DivIcon(
+        html=f'<div style="background:rgba(0,0,0,0.7); color:orange; padding:2px 6px; border-radius:12px;">{height}m</div>')).add_to(m)
+
+# 飞行高度标注
+mid_lat = (latA_w + latB_w) / 2
+mid_lng = (lngA_w + lngB_w) / 2
+folium.Marker([mid_lat, mid_lng], icon=folium.DivIcon(
+    html=f'<div style="background:rgba(0,0,0,0.6); color:white; padding:4px 12px; border-radius:20px; border:1px solid #3498db;">✈️ 飞行高度: {st.session_state.flight_height} m</div>')).add_to(m)
+
+# 绘图工具
+Draw(
+    draw_options={
+        "polygon": {"shapeOptions": {"color": "#f39c12"}, "allowIntersection": False},
+        "polyline": False, "rectangle": False, "circle": False, "circlemarker": False, "marker": False
+    },
+    edit_options={"edit": True, "remove": True}
+).add_to(m)
+MousePosition().add_to(m)
+
+# ✅ 展示地图
+st.write("### 🗺️ 地图预览")
+try:
+    output = st_folium(m, height=700, use_container_width=True, key="map_key", returned_objects=["last_draw"])
+except Exception as e:
+    st.error(f"地图渲染失败，错误信息: {e}")
+    st.stop()
+
+# 捕获绘图事件
+if output and output.get("last_draw") and output["last_draw"].get("geometry"):
+    geom = output["last_draw"]["geometry"]
+    if geom["type"] == "Polygon":
+        coords = geom["coordinates"][0]
+        st.session_state.pending_polygon = coords
+        st.rerun()
 
 # ==================== 底部数据显示 ====================
 st.divider()
@@ -261,5 +230,5 @@ c1, c2, c3 = st.columns(3)
 c1.metric("起点 A", f"({st.session_state.pointA['lat']:.6f}, {st.session_state.pointA['lng']:.6f})")
 c2.metric("终点 B", f"({st.session_state.pointB['lat']:.6f}, {st.session_state.pointB['lng']:.6f})")
 c3.metric("飞行高度", f"{st.session_state.flight_height} 米")
-st.caption(f"输入坐标系: {st.session_state.coord_type}  →  地图显示已自动转换至WGS-84")
+st.caption(f"输入坐标系: {st.session_state.coord_type}")
 st.info("💡 在左侧绘制多边形后，右侧会弹出确认框。所有障碍物可保存/加载 JSON 文件。")
