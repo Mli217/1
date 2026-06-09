@@ -1,69 +1,14 @@
+# app.py
 import streamlit as st
-import pandas as pd
-import datetime
-from streamlit_autorefresh import st_autorefresh
 
-st.set_page_config(page_title="无人机心跳监测站", page_icon="🛸", layout="wide")
+st.set_page_config(page_title="无人机智能规划系统", layout="wide")
 
-if 'heartbeat_data' not in st.session_state:
-    st.session_state.heartbeat_data = []
-if 'last_heartbeat_time' not in st.session_state:
-    st.session_state.last_heartbeat_time = None
-if 'next_seq' not in st.session_state:
-    st.session_state.next_seq = 1
-if 'offline_alert' not in st.session_state:
-    st.session_state.offline_alert = False
+st.sidebar.title("🗺️ 导航")
+st.sidebar.markdown("请从侧边栏选择功能页面")
 
-st_autorefresh(interval=1000, key="refresh")
+st.title("无人机智能化应用系统")
+st.markdown("## 功能模块")
+st.markdown("- 📍 **航线规划**：设置A/B点（校园内），选择坐标系，设定飞行高度，显示3D地图及障碍物")
+st.markdown("- 📡 **飞行监控**：实时心跳包监测，掉线报警，序号折线图")
 
-now = datetime.datetime.now()
-last_time = st.session_state.last_heartbeat_time
-
-if last_time is None:
-    st.session_state.heartbeat_data.append({"seq": st.session_state.next_seq, "time": now})
-    st.session_state.next_seq += 1
-    st.session_state.last_heartbeat_time = now
-    st.session_state.offline_alert = False
-else:
-    time_diff = (now - last_time).total_seconds()
-    if time_diff >= 1.0:
-        packets = min(int(time_diff // 1.0), 5)
-        cur = last_time
-        for _ in range(packets):
-            cur += datetime.timedelta(seconds=1)
-            if cur > now:
-                cur = now
-            st.session_state.heartbeat_data.append({"seq": st.session_state.next_seq, "time": cur})
-            st.session_state.next_seq += 1
-            st.session_state.last_heartbeat_time = cur
-
-if st.session_state.last_heartbeat_time:
-    elapsed = (now - st.session_state.last_heartbeat_time).total_seconds()
-    st.session_state.offline_alert = elapsed > 3.0
-else:
-    elapsed = 0.0
-
-if len(st.session_state.heartbeat_data) > 200:
-    st.session_state.heartbeat_data = st.session_state.heartbeat_data[-200:]
-
-st.title("🛸 无人机心跳监测")
-c1, c2, c3 = st.columns(3)
-c1.metric("最新序号", st.session_state.heartbeat_data[-1]["seq"] if st.session_state.heartbeat_data else "—")
-c2.metric("最后心跳时间", st.session_state.last_heartbeat_time.strftime("%H:%M:%S") if st.session_state.last_heartbeat_time else "—")
-c3.metric("距上次心跳", f"{elapsed:.1f} 秒")
-
-if st.session_state.offline_alert:
-    st.error("🚨 连接超时！超过3秒未收到心跳")
-else:
-    st.success("✅ 连接正常")
-
-if len(st.session_state.heartbeat_data) >= 2:
-    df = pd.DataFrame(st.session_state.heartbeat_data)
-    df["time"] = pd.to_datetime(df["time"])
-    st.line_chart(df, x="time", y="seq")
-
-with st.expander("最近记录"):
-    if st.session_state.heartbeat_data:
-        df_show = pd.DataFrame(st.session_state.heartbeat_data[-20:])
-        df_show["time"] = df_show["time"].dt.strftime("%H:%M:%S")
-        st.dataframe(df_show.rename(columns={"seq":"序号","time":"时间"}), hide_index=True)
+st.info("👈 请点击左侧侧边栏的「航线规划」或「飞行监控」开始使用")
