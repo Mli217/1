@@ -4,7 +4,7 @@ import json
 
 st.set_page_config(page_title="航线规划 - 3D地图", layout="wide")
 
-# 动态标题
+# 动态标题（根据坐标系显示不同底图类型）
 coord_type_display = st.session_state.get('coord_type', 'GCJ-02')
 if coord_type_display == "GCJ-02":
     st.title("🗺️ 航线规划 (GCJ-02 卫星3D地图 + 障碍物)")
@@ -71,7 +71,7 @@ with st.sidebar:
         st.session_state.obstacles = []
         st.rerun()
 
-# 坐标转换 (用户输入 -> WGS84)
+# 坐标转换
 def to_wgs84(lat, lng, input_type):
     if input_type == "GCJ-02":
         try:
@@ -96,7 +96,6 @@ for obs in st.session_state.obstacles:
 
 # 根据坐标系选择底图样式
 if st.session_state.coord_type == "GCJ-02":
-    # 卫星影像底图 (ArcGIS World Imagery)
     map_style = {
         "version": 8,
         "sources": {
@@ -114,7 +113,6 @@ if st.session_state.coord_type == "GCJ-02":
     }
     map_info = "3D 卫星影像地图"
 else:
-    # 街道底图 (CartoDB Voyager)
     map_style = {
         "version": 8,
         "sources": {
@@ -134,7 +132,20 @@ else:
     }
     map_info = "3D 街道地图"
 
-# 生成 HTML (Maplibre GL)
+# 收集所有坐标点用于自动适配边界（A、B、障碍物）
+all_points = [[lngA_w, latA_w], [lngB_w, latB_w]]
+for obs in obstacles_wgs:
+    all_points.append([obs["lng"], obs["lat"]])
+
+# 计算边界并添加边距（0.002 度 ≈ 200 米）
+lngs = [p[0] for p in all_points]
+lats = [p[1] for p in all_points]
+min_lng, max_lng = min(lngs), max(lngs)
+min_lat, max_lat = min(lats), max(lats)
+padding = 0.002  # 边距
+bounds = [[min_lng - padding, min_lat - padding], [max_lng + padding, max_lat + padding]]
+
+# 生成 HTML（Maplibre GL）
 map_html = f"""
 <!DOCTYPE html>
 <html>
@@ -178,6 +189,10 @@ map_html = f"""
         }});
 
         map.on('load', () => {{
+            // 自动适配视图到所有要素（A、B、障碍物）
+            const bounds = {json.dumps(bounds)};
+            map.fitBounds(bounds, {{ padding: 50, duration: 0 }});
+            
             // 起点 A
             new maplibregl.Marker({{ color: '#2ecc71', scale: 1.2 }})
                 .setLngLat([{lngA_w}, {latA_w}])
@@ -190,7 +205,7 @@ map_html = f"""
                 .setPopup(new maplibregl.Popup().setHTML('<b>终点 B</b><br/>' + {latB_w:.6f} + ', ' + {lngB_w:.6f}))
                 .addTo(map);
             
-            // 航线 (虚线)
+            // 航线（虚线）
             map.addSource('route', {{
                 type: 'geojson',
                 data: {{
@@ -214,7 +229,7 @@ map_html = f"""
                 }}
             }});
             
-            // 障碍物 (圆形)
+            // 障碍物（圆形）
             const obstacles = {json.dumps(obstacles_wgs)};
             obstacles.forEach(obs => {{
                 map.addSource(`obs-${{obs.lng}}-${{obs.lat}}`, {{
@@ -276,4 +291,4 @@ colA.metric("起点 A", f"({st.session_state.pointA['lat']:.6f}, {st.session_sta
 colB.metric("终点 B", f"({st.session_state.pointB['lat']:.6f}, {st.session_state.pointB['lng']:.6f})")
 colH.metric("飞行高度", f"{st.session_state.flight_height} 米")
 st.caption(f"输入坐标系: {st.session_state.coord_type}  →  地图显示已自动转换至WGS-84")
-st.info("💡 提示：选择 WGS-84 显示街道地图，选择 GCJ-02 显示卫星影像地图。两者均支持 3D 倾斜视角。")
+st.info("💡 提示：地图打开时会自动缩放至包含所有航点和障碍物的区域。选择 WGS-84 显示街道地图，GCJ-02 显示卫星影像地图。")
