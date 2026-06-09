@@ -2,8 +2,6 @@
 import streamlit as st
 import json
 
-# st.set_page_config(page_title="航线规划 - 3D地图", layout="wide")
-
 # 动态标题（根据坐标系显示不同底图类型）
 coord_type_display = st.session_state.get('coord_type', 'GCJ-02')
 if coord_type_display == "GCJ-02":
