@@ -10,7 +10,6 @@ with st.sidebar:
     st.page_link("1_航线规划.py", label="航线规划", icon="📍")
     st.page_link("2_飞行监控.py", label="飞行监控", icon="📡")
 
-# 主页内容
 st.title("无人机智能化应用系统")
 st.markdown("## 功能模块")
 st.markdown("- 📍 **航线规划**：设置A/B点（校园内），选择坐标系，设定飞行高度，显示3D地图及障碍物")
