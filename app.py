@@ -3,10 +3,14 @@ import streamlit as st
 
 st.set_page_config(page_title="无人机智能规划系统", layout="wide")
 
-# 侧边栏修饰样式（带小图标）
-st.sidebar.title("🗺️ 导航")
-st.sidebar.markdown("📌 功能页面")
+# 自定义侧边栏
+with st.sidebar:
+    st.title("🗺️ 导航")
+    st.markdown("📌 功能页面")
+    st.page_link("views/1_航线规划.py", label="航线规划", icon="📍")
+    st.page_link("views/2_飞行监控.py", label="飞行监控", icon="📡")
 
+# 主页内容
 st.title("无人机智能化应用系统")
 st.markdown("## 功能模块")
 st.markdown("- 📍 **航线规划**：设置A/B点（校园内），选择坐标系，设定飞行高度，显示3D地图及障碍物")
