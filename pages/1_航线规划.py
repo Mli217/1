@@ -7,7 +7,7 @@ st.set_page_config(page_title="航线规划 - 高德3D地图", layout="wide")
 st.title("🗺️ 航线规划 (高德3D地图 + 障碍物)")
 
 # 高德地图 API Key（替换成你自己的）
-AMAP_KEY = "Cy217xintiao"
+AMAP_KEY = "9bc3e8486433e66906e4112f9b69223b"
 
 # 初始化会话状态
 if 'coord_type' not in st.session_state:
