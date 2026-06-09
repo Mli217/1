@@ -5,12 +5,13 @@ from streamlit_folium import st_folium
 from folium.plugins import Draw, MousePosition
 import json
 import datetime
+import math
 
 # ==================== 页面配置 ====================
 st.set_page_config(page_title="航线规划 - 3D地图", layout="wide")
-st.title("🗺️ 航线规划 (3D地图 + 多边形障碍物圈选)")
+st.title("🗺️ 航线规划 (3D地图 + 障碍物自动识别模拟)")
 
-# ==================== 坐标转换（防崩溃） ====================
+# ==================== 坐标转换 ====================
 try:
     from utils import gcj02_to_wgs84
     def to_wgs84(lat, lng, input_type):
@@ -26,6 +27,25 @@ except ImportError:
     def to_wgs84(lat, lng, input_type):
         return lat, lng
 
+# ==================== 工具函数：将圆圈转换为多边形 ====================
+def circle_to_polygon(center_lng, center_lat, radius_meters, num_points=24):
+    """
+    将圆心坐标和半径转换为近似多边形顶点列表，用于统一存储为障碍物
+    """
+    points = []
+    # 经纬度转弧度近似系数（粗略）
+    lat_rad = math.radians(center_lat)
+    # 1度纬度 ≈ 111320 米, 1度经度 ≈ 111320 * cos(lat) 米
+    dlat = radius_meters / 110540
+    dlng = radius_meters / (111320 * math.cos(lat_rad))
+    
+    for i in range(num_points):
+        angle = math.radians(360 * i / num_points)
+        offset_lng = dlng * math.cos(angle)
+        offset_lat = dlat * math.sin(angle)
+        points.append([center_lng + offset_lng, center_lat + offset_lat])
+    return points
+
 # ==================== 初始化会话状态 ====================
 if 'coord_type' not in st.session_state:
     st.session_state.coord_type = "WGS-84"
@@ -39,8 +59,6 @@ if 'polygon_obstacles' not in st.session_state:
     st.session_state.polygon_obstacles = []
 if 'last_save_time' not in st.session_state:
     st.session_state.last_save_time = None
-if 'pending_polygon' not in st.session_state:
-    st.session_state.pending_polygon = None
 
 # ==================== 布局 ====================
 left_col, right_col = st.columns([3.5, 1.2])
@@ -51,23 +69,23 @@ with left_col:
     latA_w, lngA_w = to_wgs84(st.session_state.pointA["lat"], st.session_state.pointA["lng"], st.session_state.coord_type)
     latB_w, lngB_w = to_wgs84(st.session_state.pointB["lat"], st.session_state.pointB["lng"], st.session_state.coord_type)
 
-    # 地图中心点（防越界）
+    # 地图中心点
     center_lat = (latA_w + latB_w) / 2
     center_lng = (lngA_w + lngB_w) / 2
     if not (-90 <= center_lat <= 90) or not (-180 <= center_lng <= 180):
         center_lat, center_lng = 32.233, 118.749
 
-    # 根据坐标类型切换底图
+    # 底图切换
     if st.session_state.coord_type == "GCJ-02":
         m = folium.Map(location=[center_lat, center_lng], zoom_start=16, control_scale=True,
                        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-                       attr="Tiles © Esri — Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community")
+                       attr="Tiles © Esri")
     else:
         m = folium.Map(location=[center_lat, center_lng], zoom_start=16, control_scale=True,
                        tiles='http://webrd02.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
                        attr='高德地图')
 
-    # A/B 点
+    # A/B 点标记
     folium.Marker([latA_w, lngA_w], popup=f"起点 A<br>{latA_w:.6f}, {lngA_w:.6f}",
                   icon=folium.Icon(color="green", icon="play", prefix="fa")).add_to(m)
     folium.Marker([latB_w, lngB_w], popup=f"终点 B<br>{latB_w:.6f}, {lngB_w:.6f}",
@@ -77,21 +95,21 @@ with left_col:
     folium.PolyLine([(latA_w, lngA_w), (latB_w, lngB_w)],
                     color="blue", weight=5, opacity=0.8, dash_array="5, 10").add_to(m)
 
-    # ✅ 核心：渲染已存储的障碍物（红色边框，半透明红色填充）
+    # ✅ 核心：渲染已存储的障碍物（红色边框 + 半透明红填充）
     for obs in st.session_state.polygon_obstacles:
-        coords = obs["coordinates"]
-        poly_coords = [[c[1], c[0]] for c in coords]
+        coords = obs["coordinates"]  # 格式为 [[lng, lat], ...]
+        poly_coords = [[c[1], c[0]] for c in coords]  # 转 [lat, lng]
         height = obs.get("height", 40)
         folium.Polygon(
             locations=poly_coords,
-            color="red",  # 边框颜色红色
+            color="red",          # 边框红色
             fill=True,
-            fill_color="red", # 填充颜色红色
+            fill_color="red",     # 填充红色
             fill_opacity=0.2,
             weight=3,
             popup=f"名称: {obs.get('name', '障碍物')}<br>高度: {height}m"
         ).add_to(m)
-        # 障碍物中心高度标注
+        # 中心高度标注
         cx = sum(c[0] for c in coords) / len(coords)
         cy = sum(c[1] for c in coords) / len(coords)
         folium.Marker([cy, cx], icon=folium.DivIcon(
@@ -103,13 +121,13 @@ with left_col:
     folium.Marker([mid_lat, mid_lng], icon=folium.DivIcon(
         html=f'<div style="background:rgba(0,0,0,0.6); color:white; padding:4px 12px; border-radius:20px; border:1px solid #3498db;">✈️ 飞行高度: {st.session_state.flight_height} m</div>')).add_to(m)
 
-    # ✅ 绘图工具：启用多边形和矩形，并设置绘制时的颜色为红色
+    # ✅ 绘图工具（黄色绘制框，支持多边形、矩形、圆形）
     Draw(
         draw_options={
-            "polygon": {"shapeOptions": {"color": "#ff0000", "fillColor": "#ff0000"}, "allowIntersection": False},
+            "polygon": {"shapeOptions": {"color": "#ffdd00"}, "allowIntersection": False},
             "polyline": False,
-            "rectangle": {"shapeOptions": {"color": "#ff0000", "fillColor": "#ff0000"}}, # 启用矩形
-            "circle": False,
+            "rectangle": {"shapeOptions": {"color": "#ffdd00"}},
+            "circle": {"shapeOptions": {"color": "#ffdd00"}},  # 启用圆形
             "circlemarker": False,
             "marker": False
         },
@@ -117,7 +135,7 @@ with left_col:
     ).add_to(m)
     MousePosition().add_to(m)
 
-    # 自动适配视野（防崩溃）
+    # 自动适配视野
     all_points = []
     if (-90 <= latA_w <= 90) and (-180 <= lngA_w <= 180):
         all_points.append([latA_w, lngA_w])
@@ -141,16 +159,34 @@ with left_col:
     # 渲染地图
     output = st_folium(m, height=800, use_container_width=True, key="map_key", returned_objects=["last_draw"])
 
-    # ✅ 捕获新绘制图形的坐标
+    # ✅ 核心修改：自动识别逻辑（用户绘制框后，自动保存为红色障碍物）
     if output and output.get("last_draw") and output["last_draw"].get("geometry"):
         geom = output["last_draw"]["geometry"]
+        coords = []
+        
+        # 处理多边形和矩形（它们都是 Polygon 类型）
         if geom["type"] == "Polygon":
-            # Draw插件绘制的矩形也会被识别为Polygon，这里统一处理
             coords = geom["coordinates"][0]
-            st.session_state.pending_polygon = coords
+        
+        # 处理圆形（Circle 类型）
+        elif geom["type"] == "Circle":
+            # 圆形的坐标格式：[[lng, lat], radius]
+            center = geom["coordinates"][0]
+            radius = geom["coordinates"][1]
+            # 将圆转换为多边形近似，存储到障碍物列表
+            coords = circle_to_polygon(center[0], center[1], radius)
+        
+        if coords:
+            # 自动生成一个障碍物
+            new_obs = {
+                "name": f"自动识别障碍物 {len(st.session_state.polygon_obstacles) + 1}",
+                "coordinates": coords,
+                "height": 40  # 默认高度
+            }
+            st.session_state.polygon_obstacles.append(new_obs)
             st.rerun()
 
-# ==================== 右侧：控制面板（完美复刻UI） ====================
+# ==================== 右侧：控制面板（功能增强） ====================
 with right_col:
     st.subheader("🎮 控制面板")
     
@@ -187,8 +223,8 @@ with right_col:
     
     col_btn1, col_btn2 = st.columns(2)
     with col_btn1:
-        # 仿照截图：红色保存按钮
-        if st.button("💾 保存到文件", type="primary", use_container_width=True):
+        # 💾 保存到文件（一键部署）
+        if st.button("💾 一键部署", type="primary", use_container_width=True):
             config = {
                 "version": "v12.2",
                 "save_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -196,13 +232,14 @@ with right_col:
             }
             config_json = json.dumps(config, indent=2, ensure_ascii=False)
             st.download_button(
-                label="📥 下载",
+                label="📥 下载配置",
                 data=config_json,
                 file_name="obstacle_config.json",
                 mime="application/json",
                 use_container_width=True
             )
             st.session_state.last_save_time = config["save_time"]
+            st.success("✅ 一键部署完成！已生成文件")
     with col_btn2:
         uploaded_file = st.file_uploader("📂 从文件加载", type=["json"], label_visibility="collapsed")
         if uploaded_file is not None:
@@ -216,14 +253,19 @@ with right_col:
     
     col_btn3, col_btn4 = st.columns(2)
     with col_btn3:
-        if st.button("🗑️ 清除全部", use_container_width=True):
+        # 垃圾桶图标（清理所有框）
+        if st.button("🗑️ 清理所有框", use_container_width=True):
             st.session_state.polygon_obstacles = []
             st.session_state.last_save_time = None
+            st.success("已清理所有障碍物")
             st.rerun()
     with col_btn4:
-        # 仿照截图：红色一键部署按钮
-        if st.button("⚡ 一键部署", type="primary", use_container_width=True):
-            st.success("🚀 一键部署执行中... (模拟)")
+        # 一键清理（删除所有存储的文件）
+        if st.button("🧹 一键清理存储", type="primary", use_container_width=True):
+            st.session_state.polygon_obstacles = []
+            st.session_state.last_save_time = None
+            st.success("已清除所有存储的障碍物数据")
+            st.rerun()
     
     st.divider()
     
@@ -245,27 +287,11 @@ with right_col:
     else:
         st.button("⬇️ 下载 (暂无数据)", disabled=True, use_container_width=True)
     
-    # 📂 文件状态信息框（仿照截图效果）
+    # 📂 文件状态信息框
     status_text = f"📂 文件状态：共 {len(st.session_state.polygon_obstacles)} 个障碍物"
     if st.session_state.last_save_time:
         status_text += f" | 保存时间：{st.session_state.last_save_time}"
     st.info(status_text)
-
-    # 新障碍物表单（绘制后在右侧弹出）
-    if st.session_state.pending_polygon is not None:
-        st.warning("📍 检测到新绘制多边形/长方形")
-        with st.form(key="add_obs_form"):
-            obs_name = st.text_input("障碍物名称", "新障碍物")
-            obs_height = st.number_input("高度 (m)", min_value=10, max_value=200, value=40, step=5)
-            if st.form_submit_button("✅ 确认添加"):
-                new_obs = {
-                    "name": obs_name,
-                    "coordinates": st.session_state.pending_polygon,
-                    "height": obs_height
-                }
-                st.session_state.polygon_obstacles.append(new_obs)
-                st.session_state.pending_polygon = None
-                st.rerun()
 
     with st.expander("📋 障碍物列表"):
         if st.session_state.polygon_obstacles:
@@ -283,4 +309,4 @@ c1.metric("起点 A", f"({st.session_state.pointA['lat']:.6f}, {st.session_state
 c2.metric("终点 B", f"({st.session_state.pointB['lat']:.6f}, {st.session_state.pointB['lng']:.6f})")
 c3.metric("飞行高度", f"{st.session_state.flight_height} 米")
 st.caption(f"输入坐标系: {st.session_state.coord_type}")
-st.info("💡 在地图上绘制多边形或长方形，右侧会自动弹出确认框，填写信息后即可添加为红色障碍物。所有配置均可保存加载。")
+st.info("🎯 使用多边形、矩形或圆形工具在地图上绘制黄色框，系统会自动将其识别为红色障碍物。右侧可一键部署存储或一键清理所有数据。")
