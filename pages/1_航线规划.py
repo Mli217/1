@@ -2,8 +2,8 @@
 import streamlit as st
 import json
 
-st.set_page_config(page_title="航线规划 - 3D地图", layout="wide")
-st.title("🗺️ 航线规划 (3D地图 + 障碍物)")
+st.set_page_config(page_title="航线规划 - 3D卫星地图", layout="wide")
+st.title("🗺️ 航线规划 (3D卫星地图 + 障碍物)")
 
 # 初始化会话状态
 if 'coord_type' not in st.session_state:
@@ -65,7 +65,7 @@ with st.sidebar:
         st.session_state.obstacles = []
         st.rerun()
 
-# 坐标转换
+# 坐标转换（WGS-84 ↔ GCJ-02）
 def to_wgs84(lat, lng, input_type):
     if input_type == "GCJ-02":
         try:
@@ -73,6 +73,7 @@ def to_wgs84(lat, lng, input_type):
             wgs_lng, wgs_lat = gcj02_to_wgs84(lng, lat)
             return wgs_lat, wgs_lng
         except ImportError:
+            st.warning("utils.py 未找到，坐标不转换")
             return lat, lng
     else:
         return lat, lng
@@ -88,14 +89,14 @@ for obs in st.session_state.obstacles:
         "radius": obs["radius"], "height": obs["height"]
     })
 
-# 生成 HTML (Maplibre GL + CartoDB Voyager 稳定底图)
+# 生成 HTML（ArcGIS 卫星底图 + 3D 倾斜）
 map_html = f"""
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="initial-scale=1, user-scalable=no">
-    <title>3D 航线规划</title>
+    <title>3D 卫星航线规划</title>
     <style>
         body {{ margin: 0; padding: 0; }}
         #map {{ position: absolute; top: 0; bottom: 0; width: 100%; height: 100%; }}
@@ -119,39 +120,76 @@ map_html = f"""
 <body>
     <div id="map"></div>
     <div class="controls-note">
-        🖱️ 鼠标拖拽旋转视角 | 右键拖拽平移 | 滚轮缩放 (3D 效果)
+        🖱️ 鼠标拖拽旋转视角 | 右键拖拽平移 | 滚轮缩放 (3D 卫星地图)
     </div>
     <script>
-        // 使用 CartoDB Voyager 底图 (稳定，无需注册)
+        // 卫星影像源 (ArcGIS World Imagery)
+        const satelliteSource = {{
+            type: 'raster',
+            tiles: [
+                'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}',
+                'https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}'
+            ],
+            tileSize: 256,
+            attribution: 'Esri & Contributors'
+        }};
+        
+        // 备用街道底图 (当卫星图加载失败时回退)
+        const streetSource = {{
+            type: 'raster',
+            tiles: [
+                'https://a.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}.png',
+                'https://b.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}.png'
+            ],
+            tileSize: 256,
+            attribution: 'CartoDB'
+        }};
+
         const map = new maplibregl.Map({{
             container: 'map',
             style: {{
                 version: 8,
                 sources: {{
-                    'cartodb': {{
-                        type: 'raster',
-                        tiles: [
-                            'https://a.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}.png',
-                            'https://b.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}.png',
-                            'https://c.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}.png',
-                            'https://d.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}.png'
-                        ],
-                        tileSize: 256,
-                        attribution: '&copy; <a href="https://www.carto.com/">CartoDB</a>'
-                    }}
+                    'satellite': satelliteSource
                 }},
                 layers: [{{
-                    id: 'cartodb-layer',
+                    id: 'satellite',
                     type: 'raster',
-                    source: 'cartodb',
+                    source: 'satellite',
                     minzoom: 0,
-                    maxzoom: 19
+                    maxzoom: 18
                 }}]
             }},
             center: [{(lngA_w + lngB_w)/2}, {(latA_w + latB_w)/2}],
             zoom: 16,
             pitch: 60,
             bearing: 0
+        }});
+
+        // 监听卫星图加载错误，自动切换到街道底图
+        map.on('sourcedata', (e) => {{
+            if (e.sourceId === 'satellite' && e.sourceDataType === 'metadata') {{
+                // 尝试加载第一个瓦片，如果失败则切换
+                setTimeout(() => {{
+                    const style = map.getStyle();
+                    if (style && style.sources && style.sources.satellite) {{
+                        // 不做额外处理，依靠 tiles 多URL自动重试
+                    }}
+                }}, 2000);
+            }}
+        }});
+        
+        // 如果卫星图瓦片加载错误（网络问题），回退到街道图
+        map.on('error', (e) => {{
+            if (e.error && e.error.status === 404) {{
+                console.warn('卫星图加载失败，切换到街道底图');
+                map.getStyle().sources.satellite = streetSource;
+                map.setStyle({{
+                    version: 8,
+                    sources: {{ 'street': streetSource }},
+                    layers: [{{ id: 'street', type: 'raster', source: 'street' }}]
+                }});
+            }}
         }});
 
         map.on('load', () => {{
@@ -253,4 +291,4 @@ colA.metric("起点 A", f"({st.session_state.pointA['lat']:.6f}, {st.session_sta
 colB.metric("终点 B", f"({st.session_state.pointB['lat']:.6f}, {st.session_state.pointB['lng']:.6f})")
 colH.metric("飞行高度", f"{st.session_state.flight_height} 米")
 st.caption(f"输入坐标系: {st.session_state.coord_type}  →  地图显示已自动转换至WGS-84")
-st.info("💡 提示：地图使用 CartoDB 稳定底图，支持 3D 倾斜视角（鼠标拖拽旋转）。橙色圆点为障碍物，蓝色虚线为航线。")
+st.info("💡 提示：地图为 ArcGIS 卫星影像，支持 3D 倾斜视角。橙色圆点为障碍物，蓝色虚线为航线。若卫星图加载失败，会自动切换至街道底图。")
