@@ -1,10 +1,13 @@
+# pages/1_航线规划.py
 import streamlit as st
-import pydeck as pdk
-import pandas as pd
+import json
 from utils import gcj02_to_wgs84
 
-st.set_page_config(page_title="航线规划 - 3D地图", layout="wide")
-st.title("🗺️ 航线规划 (3D地图 + 障碍物)")
+st.set_page_config(page_title="航线规划 - 高德3D地图", layout="wide")
+st.title("🗺️ 航线规划 (高德3D地图 + 障碍物)")
+
+# 高德地图 API Key（替换成你自己的）
+AMAP_KEY = "Cy217xintiao"
 
 # 初始化会话状态
 if 'coord_type' not in st.session_state:
@@ -21,7 +24,7 @@ if 'obstacles' not in st.session_state:
         {"lat": 32.2338, "lng": 118.7488, "radius": 25, "height": 35}
     ]
 
-# 侧边栏
+# 侧边栏控制面板
 with st.sidebar:
     st.header("🎮 控制面板")
     coord_type = st.radio("输入坐标系", ["WGS-84", "GCJ-02 (高德/百度)"],
@@ -66,97 +69,134 @@ with st.sidebar:
         st.session_state.obstacles = []
         st.rerun()
 
-# 坐标转换
-def to_wgs84(lat, lng, input_type):
-    if input_type == "GCJ-02":
-        wgs_lng, wgs_lat = gcj02_to_wgs84(lng, lat)
-        return wgs_lat, wgs_lng
+# 坐标转换：用户输入的坐标系 -> 高德API使用的GCJ-02
+def to_gcj02(lat, lng, input_type):
+    if input_type == "WGS-84":
+        from utils import wgs84_to_gcj02
+        lng_gcj, lat_gcj = wgs84_to_gcj02(lng, lat)
+        return lat_gcj, lng_gcj
     else:
         return lat, lng
 
-latA_w, lngA_w = to_wgs84(st.session_state.pointA["lat"], st.session_state.pointA["lng"], st.session_state.coord_type)
-latB_w, lngB_w = to_wgs84(st.session_state.pointB["lat"], st.session_state.pointB["lng"], st.session_state.coord_type)
+latA_gcj, lngA_gcj = to_gcj02(st.session_state.pointA["lat"], st.session_state.pointA["lng"], st.session_state.coord_type)
+latB_gcj, lngB_gcj = to_gcj02(st.session_state.pointB["lat"], st.session_state.pointB["lng"], st.session_state.coord_type)
 
-# 航线路径数据
-path_data = pd.DataFrame([{"path": [[lngA_w, latA_w], [lngB_w, latB_w]]}])
-path_layer = pdk.Layer(
-    "PathLayer",
-    data=path_data,
-    get_path="path",
-    get_color="[0, 0, 255, 200]",
-    get_width=8,
-    width_min_pixels=2,
-    pickable=True
-)
-
-# A/B 点标记
-marker_data = pd.DataFrame({
-    "lat": [latA_w, latB_w],
-    "lng": [lngA_w, lngB_w],
-    "name": ["起点 A", "终点 B"],
-    "color": [[0, 255, 0, 255], [255, 0, 0, 255]]
-})
-marker_layer = pdk.Layer(
-    "ScatterplotLayer",
-    data=marker_data,
-    get_position="[lng, lat]",
-    get_fill_color="color",
-    get_radius=20,
-    pickable=True
-)
-
-# 障碍物圆柱体
-column_data = []
+# 障碍物坐标也统一转为GCJ-02
+obstacles_gcj = []
 for obs in st.session_state.obstacles:
-    obs_lat, obs_lng = to_wgs84(obs["lat"], obs["lng"], st.session_state.coord_type)
-    column_data.append({
-        "lat": obs_lat, "lng": obs_lng,
+    lat_obs, lng_obs = to_gcj02(obs["lat"], obs["lng"], st.session_state.coord_type)
+    obstacles_gcj.append({
+        "lat": lat_obs, "lng": lng_obs,
         "radius": obs["radius"], "height": obs["height"]
     })
-column_df = pd.DataFrame(column_data)
-if not column_df.empty:
-    column_layer = pdk.Layer(
-        "ColumnLayer",
-        data=column_df,
-        get_position="[lng, lat]",
-        get_elevation="height",
-        get_radius="radius",
-        get_fill_color="[255, 165, 0, 180]",
-        elevation_scale=1,
-        radius_min_pixels=3,
-        extruded=True,
-        pickable=True
-    )
-else:
-    column_layer = None
 
-# 地图视角
-center_lat = (latA_w + latB_w) / 2
-center_lng = (lngA_w + lngB_w) / 2
-view_state = pdk.ViewState(
-    latitude=center_lat, longitude=center_lng,
-    zoom=16, pitch=50, bearing=0, height=600
-)
+# 计算地图中心点
+center_lat = (latA_gcj + latB_gcj) / 2
+center_lng = (lngA_gcj + lngB_gcj) / 2
 
-# 合并图层
-layers = [path_layer, marker_layer]
-if column_layer:
-    layers.append(column_layer)
+# 生成嵌入高德地图的 HTML（支持3D视角、倾斜、旋转）
+map_html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="initial-scale=1.0, user-scalable=no">
+    <style>
+        body, html {{ margin: 0; padding: 0; height: 100%; width: 100%; }}
+        #container {{ height: 100%; width: 100%; }}
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+    <script type="text/javascript"
+        src="https://webapi.amap.com/maps?v=2.0&key={AMAP_KEY}"></script>
+    <script>
+        // 创建地图
+        var map = new AMap.Map('container', {{
+            center: [{center_lng}, {center_lat}],
+            zoom: 17,
+            pitch: 60,          // 俯仰角（3D效果）
+            viewMode: '3D',     // 3D模式
+            rotation: 0,
+            resizeEnable: true
+        }});
+        
+        // 添加A点标记（绿色）
+        var markerA = new AMap.Marker({{
+            position: [{lngA_gcj}, {latA_gcj}],
+            title: '起点 A',
+            label: {{
+                content: '<div style="background: #2ecc71; color: white; padding: 4px 8px; border-radius: 4px;">A</div>',
+                offset: new AMap.Pixel(0, -25)
+            }},
+            icon: 'https://webapi.amap.com/theme/v1.3/markers/n/mark_b.png'
+        }});
+        map.add(markerA);
+        
+        // 添加B点标记（红色）
+        var markerB = new AMap.Marker({{
+            position: [{lngB_gcj}, {latB_gcj}],
+            title: '终点 B',
+            label: {{
+                content: '<div style="background: #e74c3c; color: white; padding: 4px 8px; border-radius: 4px;">B</div>',
+                offset: new AMap.Pixel(0, -25)
+            }},
+            icon: 'https://webapi.amap.com/theme/v1.3/markers/n/mark_r.png'
+        }});
+        map.add(markerB);
+        
+        // 绘制航线（蓝色折线）
+        var line = new AMap.Polyline({{
+            path: [[{lngA_gcj}, {latA_gcj}], [{lngB_gcj}, {latB_gcj}]],
+            strokeColor: '#3498db',
+            strokeWeight: 6,
+            strokeOpacity: 0.8,
+            strokeStyle: 'solid'
+        }});
+        map.add(line);
+        
+        // 添加障碍物（圆柱体效果：使用圆+多边形模拟，无法在3D中直接画圆柱，使用圆圈+半透明填充）
+        var obstacles = {json.dumps(obstacles_gcj)};
+        for (var i = 0; i < obstacles.length; i++) {{
+            var obs = obstacles[i];
+            var circle = new AMap.Circle({{
+                center: [obs.lng, obs.lat],
+                radius: obs.radius,
+                fillColor: '#f39c12',
+                fillOpacity: 0.4,
+                strokeColor: '#e67e22',
+                strokeOpacity: 0.8,
+                strokeWeight: 2
+            }});
+            circle.setMap(map);
+            // 添加文字标注显示高度
+            var text = new AMap.Text({{
+                text: '⚠️ 障碍物\\n高' + obs.height + 'm',
+                anchor: 'center',
+                position: [obs.lng, obs.lat],
+                style: {{
+                    'background-color': 'rgba(0,0,0,0.6)',
+                    'border': 'none',
+                    'color': 'white',
+                    'padding': '4px 8px',
+                    'font-size': '12px',
+                    'border-radius': '4px'
+                }}
+            }});
+            text.setMap(map);
+        }}
+        
+        // 可选：添加测距工具或缩放控件
+        map.addControl(new AMap.ToolBar());
+        map.addControl(new AMap.Scale());
+    </script>
+</body>
+</html>
+"""
 
-# 工具提示
-tooltip = {"html": "<b>{name}</b><br/>坐标: ({lat}, {lng})", "style": {"background": "white"}}
-
-# 渲染地图 - 使用免费 Carto 底图，无需 token
-r = pdk.Deck(
-    layers=layers,
-    initial_view_state=view_state,
-    tooltip=tooltip,
-    map_provider='carto',
-    map_style='positron',
-    height=600
-)
-
-st.pydeck_chart(r)
+# 嵌入HTML地图（宽度100%，高度600px）
+st.components.v1.html(map_html, height=600, scrolling=False)
 
 # 显示规划数据
 st.subheader("当前规划数据")
@@ -164,5 +204,5 @@ colA, colB, colH = st.columns(3)
 colA.metric("起点 A", f"({st.session_state.pointA['lat']:.6f}, {st.session_state.pointA['lng']:.6f})")
 colB.metric("终点 B", f"({st.session_state.pointB['lat']:.6f}, {st.session_state.pointB['lng']:.6f})")
 colH.metric("飞行高度", f"{st.session_state.flight_height} 米")
-st.caption(f"输入坐标系: {st.session_state.coord_type}  →  地图显示已自动转换至WGS-84")
-st.info("💡 鼠标按住右键拖拽可旋转视角，滚轮缩放。橙色圆柱体为障碍物。")
+st.caption(f"输入坐标系: {st.session_state.coord_type}  →  地图显示已自动转换至GCJ-02（高德）")
+st.info("💡 提示：地图支持鼠标拖拽旋转视角（按住右键拖动）、滚轮缩放。橙色圆形区域为障碍物。")
