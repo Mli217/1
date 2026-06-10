@@ -295,7 +295,7 @@ class FlightMonitor:
 
 # ==================== 初始化会话状态 ====================
 if 'coord_type' not in st.session_state:
-    st.session_state.coord_type = "WGS-84"   # 用户界面选择
+    st.session_state.coord_type = "WGS-84"
 if 'pointA_input' not in st.session_state:
     st.session_state.pointA_input = {"lat": 32.2323, "lng": 118.749}
 if 'pointB_input' not in st.session_state:
@@ -309,7 +309,7 @@ if 'flight_speed' not in st.session_state:
 if 'selected_route' not in st.session_state:
     st.session_state.selected_route = "optimal"
 if 'polygon_obstacles' not in st.session_state:
-    st.session_state.polygon_obstacles = []   # 存储WGS-84坐标的障碍物列表
+    st.session_state.polygon_obstacles = []
 if 'temp_new_obstacle' not in st.session_state:
     st.session_state.temp_new_obstacle = None
 if 'pending_obstacle_props' not in st.session_state:
@@ -333,14 +333,13 @@ if 'memories' not in st.session_state:
 if 'active_memory' not in st.session_state:
     st.session_state.active_memory = None
 
-# 辅助函数：将输入点转换为WGS-84（内部使用）
+# 辅助函数
 def get_wgs84_A():
     return input_to_wgs84(st.session_state.pointA_input["lat"], st.session_state.pointA_input["lng"], st.session_state.coord_type)
 
 def get_wgs84_B():
     return input_to_wgs84(st.session_state.pointB_input["lat"], st.session_state.pointB_input["lng"], st.session_state.coord_type)
 
-# 保存记忆到文件
 def save_memories_to_file():
     data = {
         "memories": st.session_state.memories,
@@ -350,7 +349,6 @@ def save_memories_to_file():
     with open("memories_config.json", "w") as f:
         json.dump(data, f, indent=2)
 
-# 从文件加载记忆
 def load_memories_from_file():
     try:
         with open("memories_config.json", "r") as f:
@@ -359,7 +357,6 @@ def load_memories_from_file():
     except:
         st.session_state.memories = {}
 
-# 加载记忆到地图（障碍物已是WGS-84，直接赋值）
 def load_memory_to_map(memory_name):
     if memory_name in st.session_state.memories:
         st.session_state.polygon_obstacles = st.session_state.memories[memory_name].copy()
@@ -368,13 +365,11 @@ def load_memory_to_map(memory_name):
         return True
     return False
 
-# 清空当前地图障碍物
 def clear_current_obstacles():
     st.session_state.polygon_obstacles = []
     st.session_state.active_memory = None
     generate_waypoints()
 
-# 保存当前障碍物为一个新记忆
 def save_current_obstacles_as_memory(memory_name):
     if not memory_name or memory_name.strip() == "":
         return False
@@ -385,7 +380,6 @@ def save_current_obstacles_as_memory(memory_name):
     save_memories_to_file()
     return True
 
-# 删除一个记忆
 def delete_memory(memory_name):
     if memory_name in st.session_state.memories:
         del st.session_state.memories[memory_name]
@@ -395,17 +389,14 @@ def delete_memory(memory_name):
         return True
     return False
 
-# 初始化加载记忆
 load_memories_from_file()
 
-# 生成航线（内部使用WGS-84坐标）
 def generate_waypoints():
     latA_w, lngA_w = get_wgs84_A()
     latB_w, lngB_w = get_wgs84_B()
     A_geo = (lngA_w, latA_w)
     B_geo = (lngB_w, latB_w)
     
-    # 障碍物已经是WGS-84
     obstacles_for_route = []
     for obs in st.session_state.polygon_obstacles:
         obstacles_for_route.append({
@@ -444,10 +435,8 @@ def generate_waypoints():
         st.session_state.flight_log.append(
             f"{datetime.datetime.now().strftime('%H:%M:%S')} - 航线生成失败，请检查起终点"
         )
-    
     st.session_state.simulation_running = False
 
-# 初始生成航线
 if st.session_state.waypoints is None:
     generate_waypoints()
 
@@ -457,36 +446,35 @@ map_col, monitor_col, control_col = st.columns([2.5, 0.8, 1.2])
 with map_col:
     st.subheader("卫星地图 + 障碍物")
     
-    # 获取当前坐标系下用于显示的A/B坐标
     latA_disp, lngA_disp = wgs84_to_display(*get_wgs84_A(), st.session_state.coord_type)
     latB_disp, lngB_disp = wgs84_to_display(*get_wgs84_B(), st.session_state.coord_type)
     
     center_lat = (latA_disp + latB_disp) / 2
     center_lng = (lngA_disp + lngB_disp) / 2
 
-    # 根据地圖坐标系选择底图
+    # ========== 修改：互换底图 ==========
+    # 原逻辑：WGS-84 -> Esri，GCJ-02 -> 高德
+    # 现逻辑：WGS-84 -> 高德，GCJ-02 -> Esri
     if st.session_state.coord_type == "WGS-84":
-        # 使用 WGS-84 底图（Esri卫星图）
-        m = folium.Map(
-            location=[center_lat, center_lng],
-            zoom_start=17,
-            tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-            attr='Esri Satellite'
-        )
-    else:  # GCJ-02
-        # 使用 GCJ-02 底图（高德地图）
+        # WGS-84 模式使用高德地图（注意：高德底图是GCJ-02坐标系，但显示时已做坐标转换）
         m = folium.Map(
             location=[center_lat, center_lng],
             zoom_start=17,
             tiles='http://webrd02.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
             attr='高德地图'
         )
+    else:  # GCJ-02 模式
+        # GCJ-02 模式使用 Esri 卫星图（WGS-84 底图，显示时坐标已转换）
+        m = folium.Map(
+            location=[center_lat, center_lng],
+            zoom_start=17,
+            tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            attr='Esri Satellite'
+        )
     
-    # 添加起点终点标记（显示坐标已转换）
     folium.Marker([latA_disp, lngA_disp], popup=f"起点 A", icon=folium.Icon(color="green")).add_to(m)
     folium.Marker([latB_disp, lngB_disp], popup=f"终点 B", icon=folium.Icon(color="red")).add_to(m)
     
-    # 绘制航线（注意 waypoints 是 WGS-84，需要转换为当前坐标系显示）
     if st.session_state.waypoints:
         display_waypoints = []
         for lng_w, lat_w in st.session_state.waypoints:
@@ -495,22 +483,19 @@ with map_col:
         folium.PolyLine(display_waypoints, color="blue", weight=4, opacity=0.8, 
                        popup=f"航线: {st.session_state.selected_route}").add_to(m)
         
-        # 可选：显示航点
         for i, (lng_w, lat_w) in enumerate(st.session_state.waypoints):
             lat_disp, lng_disp = wgs84_to_display(lat_w, lng_w, st.session_state.coord_type)
             folium.CircleMarker([lat_disp, lng_disp], radius=3, color="blue", fill=True,
                                popup=f"航点{i}").add_to(m)
         
-        # 绘制无人机当前位置
         if st.session_state.flight_monitor and st.session_state.flight_monitor.current_position:
             pos = st.session_state.flight_monitor.current_position
             lat_disp, lng_disp = wgs84_to_display(pos[1], pos[0], st.session_state.coord_type)
             folium.Marker([lat_disp, lng_disp], icon=folium.Icon(color="purple", icon="plane", prefix="fa"),
                          popup="无人机").add_to(m)
     
-    # 绘制障碍物（障碍物坐标存储为WGS-84，需要转换为当前坐标系显示）
     for i, obs in enumerate(st.session_state.polygon_obstacles):
-        raw_coords = obs["coordinates"]  # 每个元素为 [lng, lat] WGS-84
+        raw_coords = obs["coordinates"]
         disp_coords = []
         for lng_w, lat_w in raw_coords:
             lat_disp, lng_disp = wgs84_to_display(lat_w, lng_w, st.session_state.coord_type)
@@ -519,7 +504,6 @@ with map_col:
         folium.Polygon(locations=disp_coords, color=color, fill=True, fill_opacity=0.3,
                        popup=f"{obs.get('name', f'障碍物{i+1}')}<br>高度: {obs['height']}m").add_to(m)
     
-    # 绘图工具（绘制结果返回的是WGS-84坐标）
     Draw(draw_options={
         "polygon": {"shapeOptions": {"color": "#ffdd00"}},
         "rectangle": {"shapeOptions": {"color": "#ffdd00"}},
@@ -530,7 +514,6 @@ with map_col:
     
     output = st_folium(m, height=650, width="100%", key="map")
     
-    # 处理新绘制的图形（坐标已是WGS-84）
     if output and output.get("last_active_drawing"):
         drawing = output["last_active_drawing"]
         if drawing and drawing.get("geometry"):
@@ -541,7 +524,6 @@ with map_col:
                 for lng, lat in raw:
                     coords.append([lng, lat])
             elif geom["type"] == "Rectangle":
-                # 矩形返回的坐标是 [[lng1, lat1], [lng2, lat2]] 等，需要转换
                 raw = geom["coordinates"][0]
                 for lng, lat in raw:
                     coords.append([lng, lat])
@@ -630,18 +612,15 @@ with monitor_col:
 with control_col:
     st.subheader("控制面板")
     
-    # 坐标系选择
     coord_opt = st.radio("坐标系", ["WGS-84", "GCJ-02"], index=0 if st.session_state.coord_type == "WGS-84" else 1)
     if coord_opt != st.session_state.coord_type:
         st.session_state.coord_type = coord_opt
-        # 重新生成航线（因为A/B点需要重新转换）
         generate_waypoints()
         st.rerun()
     
     st.divider()
     st.markdown("### 起终点")
     
-    # 显示当前输入坐标（与坐标系联动）
     st.markdown("**起点 A**")
     latA = st.number_input("纬度", value=st.session_state.pointA_input["lat"], format="%.6f", key="latA")
     lngA = st.number_input("经度", value=st.session_state.pointA_input["lng"], format="%.6f", key="lngA")
@@ -697,7 +676,6 @@ with control_col:
     st.divider()
     st.markdown("### 障碍物与记忆管理")
     
-    # 新障碍物命名表单（绘制后显示）
     if st.session_state.temp_new_obstacle is not None:
         st.warning("📌 检测到新绘制的区域，请设置该障碍物属性")
         default_name = f"障碍物{len(st.session_state.polygon_obstacles)+1}"
@@ -710,7 +688,6 @@ with control_col:
         col1, col2 = st.columns(2)
         with col1:
             if st.button("✅ 确认添加", type="primary", use_container_width=True):
-                # 新障碍物坐标已经是WGS-84
                 st.session_state.polygon_obstacles.append({
                     "name": new_obs_name,
                     "coordinates": st.session_state.temp_new_obstacle,
@@ -733,7 +710,6 @@ with control_col:
     st.divider()
     st.markdown("#### 📦 记忆管理")
     
-    # 保存当前障碍物为记忆
     memory_name_input = st.text_input("记忆名称", value=f"记忆{len(st.session_state.memories)+1}", key="memory_save_name")
     col_save_mem, col_clear = st.columns(2)
     with col_save_mem:
@@ -752,7 +728,6 @@ with control_col:
             st.success("已清空地图上所有障碍物")
             st.rerun()
     
-    # 加载记忆
     if st.session_state.memories:
         memory_options = list(st.session_state.memories.keys())
         selected_memory = st.selectbox("选择要加载的记忆", memory_options, index=0 if memory_options else None)
