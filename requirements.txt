@@ -1,7 +1,6 @@
 streamlit
+plotly
+pandas
 folium
 streamlit-folium
-pandas
-matplotlib
-streamlit-autorefresh
-coord-convert
+shapely
