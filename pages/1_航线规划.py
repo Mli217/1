@@ -330,7 +330,6 @@ def save_obstacles():
         "save_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "flight_height": st.session_state.flight_height,
         "safe_radius": st.session_state.safe_radius,
-        # ✅ 关键修复：保存障碍物时，同时存储当前坐标系
         "coord_type": st.session_state.coord_type,
         "obstacles": st.session_state.polygon_obstacles
     }
@@ -398,7 +397,7 @@ with map_col:
     center_lat = (latA_disp + latB_disp) / 2
     center_lng = (lngA_disp + lngB_disp) / 2
 
-    # ✅ 核心：根据当前坐标系选择底图
+    # 根据当前坐标系选择底图
     if st.session_state.coord_type == "WGS-84":
         m = folium.Map(
             location=[center_lat, center_lng],
@@ -420,7 +419,6 @@ with map_col:
     if st.session_state.waypoints:
         display_waypoints = []
         for lng, lat in st.session_state.waypoints:
-            # ✅ 核心：航点需要转换显示坐标
             if st.session_state.coord_type == "GCJ-02":
                 wgs_lng, wgs_lat = wgs84_to_gcj02(lng, lat)
             else:
@@ -446,19 +444,15 @@ with map_col:
             folium.Marker([disp_lat, disp_lng], icon=folium.Icon(color="purple", icon="plane", prefix="fa"),
                          popup="无人机").add_to(m)
     
-    # ✅ 核心：绘制障碍物时，始终转换到显示坐标系
+    # 绘制障碍物（坐标转换修复）
     for i, obs in enumerate(st.session_state.polygon_obstacles):
-        # 先拿到原始存储坐标
         raw_coords = obs["coordinates"]
-        # 转为显示坐标
         disp_coords = []
         for lng, lat in raw_coords:
             if st.session_state.coord_type == "GCJ-02":
-                # 如果当前是GCJ显示模式，说明存储的是WGS，需要转为GCJ
                 gcj_lng, gcj_lat = wgs84_to_gcj02(lng, lat)
                 disp_coords.append([gcj_lat, gcj_lng])
             else:
-                # 如果当前是WGS显示模式，说明存储的是WGS，直接使用
                 disp_coords.append([lat, lng])
         color = "red" if obs["height"] >= st.session_state.flight_height else "orange"
         folium.Polygon(locations=disp_coords, color=color, fill=True, fill_opacity=0.3,
@@ -474,7 +468,7 @@ with map_col:
     
     output = st_folium(m, height=650, width="100%", key="map")
     
-    # ✅ 核心修复：绘制障碍物时，强制存储为WGS-84坐标，并标记其来源
+    # 处理绘制
     if output and output.get("last_active_drawing"):
         drawing = output["last_active_drawing"]
         if drawing and drawing.get("geometry"):
@@ -495,13 +489,225 @@ with map_col:
                 st.session_state.temp_new_obstacle = coords
                 st.rerun()
 
-# 后续监控面板和控制面板代码保持不变（此处省略）
 with monitor_col:
-    # (保持原代码)
-    pass
+    st.subheader("飞行监控")
+    
+    if st.session_state.waypoints:
+        st.info(f"航线: {st.session_state.selected_route} | {st.session_state.route_message}")
+        st.metric("总航点数", f"{len(st.session_state.waypoints)}")
+        if st.session_state.flight_monitor:
+            st.metric("总航程", f"{st.session_state.flight_monitor.total_distance:.1f}m")
+        else:
+            st.metric("总航程", "计算中...")
+    else:
+        st.warning("请先生成航线")
+    
+    st.divider()
+    st.markdown("### 飞行状态")
+    
+    if st.session_state.flight_monitor and st.session_state.flight_monitor.total_distance > 0:
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.metric("当前航点", f"{st.session_state.flight_monitor.current_index + 1}/{len(st.session_state.flight_monitor.waypoints)}")
+        with col_b:
+            st.metric("飞行速度", f"{st.session_state.flight_speed} m/s")
+        
+        elapsed = st.session_state.flight_monitor.get_elapsed_time()
+        remaining_dist = st.session_state.flight_monitor.get_remaining_distance()
+        est_time = st.session_state.flight_monitor.get_estimated_time()
+        
+        st.metric("已用时间", f"{elapsed:.1f}s")
+        st.metric("剩余距离", f"{remaining_dist:.1f}m")
+        st.metric("预计到达", f"{est_time:.1f}s")
+        
+        if st.session_state.simulation_running and st.session_state.flight_monitor.total_distance > 0:
+            progress = 1 - (remaining_dist / st.session_state.flight_monitor.total_distance)
+            battery_used = progress * 100
+            st.session_state.battery_level = max(0, 100 - battery_used)
+        
+        st.progress(st.session_state.battery_level / 100)
+        st.metric("电量", f"{st.session_state.battery_level:.1f}%")
+        
+        st.divider()
+        
+        col_start, col_pause, col_reset = st.columns(3)
+        with col_start:
+            if st.button("▶️ 开始", use_container_width=True):
+                if st.session_state.flight_monitor and not st.session_state.simulation_running:
+                    st.session_state.flight_monitor.start()
+                    st.session_state.simulation_running = True
+                    st.rerun()
+        with col_pause:
+            if st.button("⏸️ 暂停", use_container_width=True):
+                if st.session_state.flight_monitor and st.session_state.simulation_running:
+                    st.session_state.flight_monitor.pause()
+                    st.session_state.simulation_running = False
+                    st.rerun()
+        with col_reset:
+            if st.button("🔄 重置", use_container_width=True):
+                if st.session_state.flight_monitor:
+                    st.session_state.flight_monitor.reset()
+                    st.session_state.simulation_running = False
+                    st.session_state.battery_level = 100
+                    st.rerun()
+    else:
+        st.warning("请先生成有效航线")
+    
+    st.divider()
+    st.markdown("### 飞行日志")
+    log_container = st.container(height=150)
+    with log_container:
+        if st.session_state.flight_log:
+            for log in st.session_state.flight_log[-10:]:
+                st.caption(log)
+        else:
+            st.caption("等待飞行...")
 
 with control_col:
-    # (保持原代码)
-    pass
+    st.subheader("控制面板")
+    
+    coord_opt = st.radio("坐标系", ["WGS-84", "GCJ-02"], index=1)
+    if coord_opt != st.session_state.coord_type:
+        st.session_state.coord_type = coord_opt
+        st.rerun()
+    
+    st.divider()
+    st.markdown("### 起终点")
+    
+    st.markdown("**起点 A (32.2323, 118.749)**")
+    latA = st.number_input("纬度", value=st.session_state.pointA["lat"], format="%.6f")
+    lngA = st.number_input("经度", value=st.session_state.pointA["lng"], format="%.6f")
+    if st.button("📍 设置A点"):
+        st.session_state.pointA = {"lat": latA, "lng": lngA}
+        generate_waypoints()
+        st.rerun()
+    
+    st.markdown("**终点 B (32.2344, 118.749)**")
+    latB = st.number_input("纬度", value=st.session_state.pointB["lat"], format="%.6f", key="latB")
+    lngB = st.number_input("经度", value=st.session_state.pointB["lng"], format="%.6f", key="lngB")
+    if st.button("📍 设置B点"):
+        st.session_state.pointB = {"lat": latB, "lng": lngB}
+        generate_waypoints()
+        st.rerun()
+    
+    st.divider()
+    st.markdown("### 飞行参数")
+    
+    new_height = st.number_input("飞行高度(m)", value=st.session_state.flight_height, step=5)
+    if new_height != st.session_state.flight_height:
+        st.session_state.flight_height = new_height
+        generate_waypoints()
+        st.rerun()
+    
+    new_radius = st.number_input("安全半径(m)", value=st.session_state.safe_radius, step=1)
+    if new_radius != st.session_state.safe_radius:
+        st.session_state.safe_radius = new_radius
+        generate_waypoints()
+        st.rerun()
+    
+    new_speed = st.number_input("飞行速度(m/s)", value=st.session_state.flight_speed, step=1)
+    if new_speed != st.session_state.flight_speed:
+        st.session_state.flight_speed = new_speed
+        if st.session_state.flight_monitor:
+            st.session_state.flight_monitor.speed = new_speed
+        st.rerun()
+    
+    st.divider()
+    st.markdown("### 航线选择")
+    route_option = st.radio("绕行策略", ["optimal", "left", "right"],
+                           format_func=lambda x: {"optimal": "⭐ 最佳航线", "left": "⬅️ 向左绕行", "right": "➡️ 向右绕行"}[x])
+    if route_option != st.session_state.selected_route:
+        st.session_state.selected_route = route_option
+        generate_waypoints()
+        st.rerun()
+    
+    if st.button("🚁 重新生成航线", type="primary", use_container_width=True):
+        generate_waypoints()
+        st.success("航线已重新生成！")
+        st.rerun()
+    
+    st.divider()
+    st.markdown("### 障碍物管理")
+    
+    if st.session_state.temp_new_obstacle is not None:
+        st.warning("📌 检测到新绘制的区域，请设置高度")
+        new_obs_height = st.number_input("障碍物高度(米)", min_value=0, max_value=500, value=40, step=5, key="new_h")
+        new_obs_name = st.text_input("名称", value=f"障碍物{len(st.session_state.polygon_obstacles)+1}", key="new_n")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("✅ 确认添加", type="primary", use_container_width=True):
+                st.session_state.polygon_obstacles.append({
+                    "name": new_obs_name,
+                    "coordinates": st.session_state.temp_new_obstacle,
+                    "height": new_obs_height
+                })
+                save_obstacles()
+                st.session_state.temp_new_obstacle = None
+                generate_waypoints()
+                st.success(f"已添加 {new_obs_name} (高度{new_obs_height}m)")
+                st.rerun()
+        with col2:
+            if st.button("❌ 取消", use_container_width=True):
+                st.session_state.temp_new_obstacle = None
+                st.rerun()
+    else:
+        st.info("💡 在地图上绘制多边形/矩形/圆形，将自动识别并弹出高度设置")
+    
+    col_save, col_load = st.columns(2)
+    with col_save:
+        if st.button("💾 一键保存", use_container_width=True):
+            save_obstacles()
+            st.success("已保存配置")
+    with col_load:
+        if st.button("📂 加载记忆", use_container_width=True):
+            try:
+                with open("obstacle_config.json", "r") as f:
+                    config = json.load(f)
+                    st.session_state.polygon_obstacles = config.get("obstacles", [])
+                    st.session_state.flight_height = config.get("flight_height", 10)
+                    st.session_state.safe_radius = config.get("safe_radius", 10)
+                generate_waypoints()
+                st.success("已加载障碍物")
+                st.rerun()
+            except:
+                st.warning("未找到记忆文件")
+    
+    if st.button("🗑️ 清理所有", use_container_width=True):
+        st.session_state.polygon_obstacles = []
+        st.session_state.waypoints = None
+        st.session_state.flight_monitor = None
+        try:
+            os.remove("obstacle_config.json")
+        except:
+            pass
+        generate_waypoints()
+        st.rerun()
+    
+    st.info(f"📂 障碍物数量: {len(st.session_state.polygon_obstacles)}")
+    
+    with st.expander("📋 障碍物列表"):
+        if st.session_state.polygon_obstacles:
+            for i, obs in enumerate(st.session_state.polygon_obstacles):
+                st.write(f"{i+1}. {obs.get('name', f'障碍物{i+1}')} - {obs.get('height', 40)}m")
+        else:
+            st.write("暂无")
 
-# ... (后续代码保持不变)
+# ==================== 模拟飞行更新 ====================
+if st.session_state.simulation_running and st.session_state.flight_monitor:
+    dt = 0.5
+    completed = st.session_state.flight_monitor.update(dt)
+    if completed:
+        st.session_state.simulation_running = False
+        st.session_state.flight_log.append(f"{datetime.datetime.now().strftime('%H:%M:%S')} - ✅ 飞行完成!")
+        st.rerun()
+    else:
+        if int(time.time() * 2) % 4 == 0:
+            st.session_state.flight_log.append(
+                f"{datetime.datetime.now().strftime('%H:%M:%S')} - 航点 {st.session_state.flight_monitor.current_index + 1}/{len(st.session_state.flight_monitor.waypoints)}, 剩余 {st.session_state.flight_monitor.get_remaining_distance():.1f}m"
+            )
+    time.sleep(0.1)
+    st.rerun()
+
+st.divider()
+st.caption(f"📍 A点: 32.2323, 118.749 | B点: 32.2344, 118.749 | 障碍物: {len(st.session_state.polygon_obstacles)}个 | 坐标系: {st.session_state.coord_type}")
