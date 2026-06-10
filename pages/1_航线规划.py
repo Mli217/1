@@ -231,40 +231,48 @@ with right_col:
 
     st.divider()
     
-    # ==================== 🎯 绘制模式选择（一列显示） ====================
+    # ==================== 🎯 绘制模式选择（三个按钮一列显示） ====================
     st.markdown("### 🎯 绘制模式")
+    
     col_draw1, col_draw2, col_draw3 = st.columns(3)
     with col_draw1:
-        if st.button("🔺 多边形", use_container_width=True,
+        if st.button("🔺\n多边形", use_container_width=True,
                     key="btn_polygon",
                     type="primary" if st.session_state.draw_mode == "polygon" else "secondary"):
             st.session_state.draw_mode = "polygon"
             st.rerun()
     with col_draw2:
-        if st.button("⬛ 矩形", use_container_width=True,
+        if st.button("⬛\n矩形", use_container_width=True,
                     key="btn_rectangle",
                     type="primary" if st.session_state.draw_mode == "rectangle" else "secondary"):
             st.session_state.draw_mode = "rectangle"
             st.rerun()
     with col_draw3:
-        if st.button("⭕ 圆形", use_container_width=True,
+        if st.button("⭕\n圆形", use_container_width=True,
                     key="btn_circle",
                     type="primary" if st.session_state.draw_mode == "circle" else "secondary"):
             st.session_state.draw_mode = "circle"
             st.rerun()
-    
-    st.caption(f"当前模式: {['多边形', '矩形', '圆形'][['polygon', 'rectangle', 'circle'].index(st.session_state.draw_mode)]}")
-    
+
     st.divider()
     
-    # 🚧 障碍物配置持久化
-    st.markdown("### 🚧 障碍物管理")
-    st.caption("配置文件：`obstacle_config.json` | 版本：v12.2")
+    # 🚧 障碍物配置持久化（标题和描述）
+    st.markdown("### 🚧 障碍物配置持久化")
+    st.caption("配置文件：`c:\\Users\\77463\\obstacle_config.json` | 版本: v12.2 障碍物持久化版")
     
-    # 第一行：一键部署 + 文件加载
-    col_btn1, col_btn2 = st.columns(2)
+    st.markdown("#### 💡 文件保存在程序同目录下，绝对路径如上所示")
+    
+    # ==================== 四个主功能按钮（并排显示） ====================
+    col_btn1, col_btn2, col_btn3, col_btn4 = st.columns(4)
+    
     with col_btn1:
-        if st.button("💾 一键部署", type="primary", use_container_width=True):
+        st.markdown(
+            '<div style="background-color:#ef5350; color:white; padding:20px; border-radius:8px; text-align:center; cursor:pointer; font-weight:bold;">'
+            '💾 保存到文件'
+            '</div>',
+            unsafe_allow_html=True
+        )
+        if st.button("💾_save", key="save_btn", use_container_width=True, label_visibility="collapsed"):
             if st.session_state.polygon_obstacles:
                 config = {
                     "version": "v12.2",
@@ -273,20 +281,18 @@ with right_col:
                 }
                 config_json = json.dumps(config, indent=2, ensure_ascii=False)
                 st.session_state.last_save_time = config["save_time"]
-                st.success("✅ 一键部署完成！")
-                st.download_button(
-                    label="📥 立即下载配置",
-                    data=config_json,
-                    file_name="obstacle_config.json",
-                    mime="application/json",
-                    use_container_width=True,
-                    key="download_after_deploy"
-                )
+                st.success("✅ 已保存！")
             else:
                 st.warning("⚠️ 暂无障碍物数据")
     
     with col_btn2:
-        uploaded_file = st.file_uploader("📂 加载配置文件", type=["json"], label_visibility="collapsed", key="upload_config")
+        st.markdown(
+            '<div style="background-color:#fff; color:#333; padding:20px; border:1px solid #ccc; border-radius:8px; text-align:center; cursor:pointer; font-weight:bold;">'
+            '📂 从文件加载'
+            '</div>',
+            unsafe_allow_html=True
+        )
+        uploaded_file = st.file_uploader("📂_upload", type=["json"], label_visibility="collapsed", key="upload_config")
         if uploaded_file is not None:
             try:
                 config = json.load(uploaded_file)
@@ -297,26 +303,42 @@ with right_col:
             except Exception as e:
                 st.error(f"❌ 加载失败: {e}")
     
-    # 第二行：清理框 + 清理存储
-    col_btn3, col_btn4 = st.columns(2)
     with col_btn3:
-        if st.button("🗑️ 清理所有框", use_container_width=True):
+        st.markdown(
+            '<div style="background-color:#fff; color:#333; padding:20px; border:1px solid #ccc; border-radius:8px; text-align:center; cursor:pointer; font-weight:bold;">'
+            '🔲 清除全部'
+            '</div>',
+            unsafe_allow_html=True
+        )
+        if st.button("🔲_clear", key="clear_btn", use_container_width=True, label_visibility="collapsed"):
             st.session_state.polygon_obstacles = []
             st.session_state.last_save_time = None
-            st.success("✅ 已清理所有障碍物")
+            st.success("✅ 已清除")
             st.rerun()
     
     with col_btn4:
-        if st.button("🧹 一键清理存储", type="primary", use_container_width=True):
-            st.session_state.polygon_obstacles = []
-            st.session_state.last_save_time = None
-            st.success("✅ 已清除所有数据")
-            st.rerun()
+        st.markdown(
+            '<div style="background-color:#ef5350; color:white; padding:20px; border-radius:8px; text-align:center; cursor:pointer; font-weight:bold;">'
+            '🔗 一键部署'
+            '</div>',
+            unsafe_allow_html=True
+        )
+        if st.button("🔗_deploy", key="deploy_btn", use_container_width=True, label_visibility="collapsed"):
+            if st.session_state.polygon_obstacles:
+                config = {
+                    "version": "v12.2",
+                    "save_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "obstacles": st.session_state.polygon_obstacles
+                }
+                st.session_state.last_save_time = config["save_time"]
+                st.success("✅ 一键部署完成！")
+            else:
+                st.warning("⚠️ 暂无障碍物数据")
     
     st.divider()
     
-    # 📥 下载配置文件
-    st.markdown("#### 📥 快速下载")
+    # ==================== 下载配置文件到本地 ====================
+    st.markdown("#### 📥 下载配置文件到本地")
     if st.session_state.polygon_obstacles:
         config_download = {
             "version": "v12.2",
@@ -333,25 +355,23 @@ with right_col:
     else:
         st.button("⬇️ 下载 (暂无数据)", disabled=True, use_container_width=True)
     
-    # 📂 文件状态信息框
+    st.markdown("点击下载即可将云端保存的障碍物配置保存到你的电脑")
+    
+    st.divider()
+    
+    # ==================== 文件状态信息框 ====================
     status_text = f"📂 文件状态：共 {len(st.session_state.polygon_obstacles)} 个障碍物"
     if st.session_state.last_save_time:
-        status_text += f"\n💾 保存时间：{st.session_state.last_save_time}"
+        status_text += f" | 保存时间：{st.session_state.last_save_time}"
+    
     st.info(status_text)
-
-    # 📋 障碍物列表（可展开）
+    
+    # ==================== 障碍物列表（可展开） ====================
     with st.expander("📋 障碍物列表详情"):
         if st.session_state.polygon_obstacles:
             for i, obs in enumerate(st.session_state.polygon_obstacles):
                 pts = len(obs["coordinates"])
-                col_info, col_delete = st.columns([4, 1])
-                with col_info:
-                    st.write(f"{i+1}. **{obs.get('name', f'障碍物{i+1}')}** | 点数: {pts} | 高度: {obs.get('height', 40)}m")
-                with col_delete:
-                    if st.button("❌", key=f"delete_obs_{i}", use_container_width=True):
-                        st.session_state.polygon_obstacles.pop(i)
-                        st.success("已删除")
-                        st.rerun()
+                st.write(f"{i+1}. **{obs.get('name', f'障碍物{i+1}')}** | 点数: {pts} | 高度: {obs.get('height', 40)}m")
         else:
             st.write("暂无障碍物")
 
@@ -368,9 +388,17 @@ st.caption(f"输入坐标系: {st.session_state.coord_type}")
 st.info(
     """
     **🎯 使用指南：**
-    1️⃣ 选择右侧的绘制模式（多边形 / 矩形 / 圆形）
-    2️⃣ 在地图上绘制黄色框（系统自动识别为红色障碍物）
-    3️⃣ 右侧面板管理障碍物：一键部署、加载配置、清理数据
-    4️⃣ 使用垃圾桶清理单个障碍物，或一键清理所有框
+    
+    1️⃣ **选择绘制模式** - 在右侧选择多边形/矩形/圆形工具
+    
+    2️⃣ **绘制黄色框** - 在地图上绘制黄色框后，系统自动识别为红色障碍物
+    
+    3️⃣ **管理配置** - 使用四个主按钮管理障碍物：
+    - 💾 **保存到文件** - 将障碍物保存到程序目录
+    - 📂 **从文件加载** - 加载之前保存的配置
+    - 🔲 **清除全部** - 清空所有已绘制的障碍物
+    - 🔗 **一键部署** - 快速部署当前配置
+    
+    4️⃣ **下载本地** - 点击下载按钮将配置保存到你的电脑
     """
 )
