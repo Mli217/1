@@ -417,10 +417,24 @@ with map_col:
     
     center_lat = (latA_disp + latB_disp) / 2
     center_lng = (lngA_disp + lngB_disp) / 2
-    
-    m = folium.Map(location=[center_lat, center_lng], zoom_start=17,
-                   tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-                   attr="Esri Satellite")
+
+    # ✅ 核心修改：根据坐标系选择底图
+    if st.session_state.coord_type == "WGS-84":
+        # WGS-84 模式：使用高德街道地图
+        m = folium.Map(
+            location=[center_lat, center_lng],
+            zoom_start=17,
+            tiles='http://webrd02.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
+            attr='高德地图'
+        )
+    else:
+        # GCJ-02 模式：使用卫星地图
+        m = folium.Map(
+            location=[center_lat, center_lng],
+            zoom_start=17,
+            tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            attr="Esri Satellite"
+        )
     
     folium.Marker([latA_disp, lngA_disp], popup=f"起点 A", icon=folium.Icon(color="green")).add_to(m)
     folium.Marker([latB_disp, lngB_disp], popup=f"终点 B", icon=folium.Icon(color="red")).add_to(m)
