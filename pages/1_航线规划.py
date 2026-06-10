@@ -8,6 +8,7 @@ import datetime
 import math
 import os
 import time
+import uuid
 from shapely.geometry import Polygon, Point, LineString
 
 # ==================== 页面配置 ====================
@@ -299,19 +300,12 @@ if 'safe_radius' not in st.session_state:
     st.session_state.safe_radius = 10
 if 'flight_speed' not in st.session_state:
     st.session_state.flight_speed = 10
-if 'polygon_obstacles' not in st.session_state:
-    try:
-        with open("obstacle_config.json", "r") as f:
-            data = json.load(f)
-            st.session_state.polygon_obstacles = data.get("obstacles", [])
-            st.session_state.flight_height = data.get("flight_height", 10)
-            st.session_state.safe_radius = data.get("safe_radius", 10)
-    except:
-        st.session_state.polygon_obstacles = []
 if 'selected_route' not in st.session_state:
     st.session_state.selected_route = "optimal"
 if 'temp_new_obstacle' not in st.session_state:
     st.session_state.temp_new_obstacle = None
+if 'pending_obstacle_props' not in st.session_state:
+    st.session_state.pending_obstacle_props = None  # 用于存储新障碍物的名字和高度输入
 if 'waypoints' not in st.session_state:
     st.session_state.waypoints = None
 if 'flight_monitor' not in st.session_state:
@@ -325,7 +319,88 @@ if 'flight_log' not in st.session_state:
 if 'route_message' not in st.session_state:
     st.session_state.route_message = ""
 
-def save_obstacles():
+# 新增：记忆管理
+if 'memories' not in st.session_state:
+    st.session_state.memories = {}  # {记忆名称: [障碍物列表]}
+if 'active_memory' not in st.session_state:
+    st.session_state.active_memory = None  # 当前加载到地图上的记忆名称
+
+# 保存记忆到文件
+def save_memories_to_file():
+    data = {
+        "memories": st.session_state.memories,
+        "coord_type": st.session_state.coord_type,
+        "last_save_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    with open("memories_config.json", "w") as f:
+        json.dump(data, f, indent=2)
+
+# 从文件加载记忆
+def load_memories_from_file():
+    try:
+        with open("memories_config.json", "r") as f:
+            data = json.load(f)
+        st.session_state.memories = data.get("memories", {})
+        # 记忆中的坐标存储为WGS-84格式，加载时不需要转换
+    except:
+        st.session_state.memories = {}
+
+# 加载记忆到地图
+def load_memory_to_map(memory_name):
+    if memory_name in st.session_state.memories:
+        st.session_state.polygon_obstacles = st.session_state.memories[memory_name].copy()
+        st.session_state.active_memory = memory_name
+        generate_waypoints()
+        return True
+    return False
+
+# 清空当前地图障碍物
+def clear_current_obstacles():
+    st.session_state.polygon_obstacles = []
+    st.session_state.active_memory = None
+    generate_waypoints()
+
+# 保存当前障碍物为一个新记忆
+def save_current_obstacles_as_memory(memory_name):
+    if not memory_name or memory_name.strip() == "":
+        return False
+    if not st.session_state.polygon_obstacles:
+        return False
+    st.session_state.memories[memory_name.strip()] = st.session_state.polygon_obstacles.copy()
+    st.session_state.active_memory = memory_name.strip()
+    save_memories_to_file()
+    return True
+
+# 删除一个记忆
+def delete_memory(memory_name):
+    if memory_name in st.session_state.memories:
+        del st.session_state.memories[memory_name]
+        save_memories_to_file()
+        if st.session_state.active_memory == memory_name:
+            st.session_state.active_memory = None
+        return True
+    return False
+
+# 初始化加载记忆
+if 'polygon_obstacles' not in st.session_state:
+    # 尝试加载记忆文件
+    load_memories_from_file()
+    if st.session_state.memories:
+        # 如果存在记忆，不自动加载，让用户选择
+        st.session_state.polygon_obstacles = []
+    else:
+        # 否则尝试加载旧的 config 文件
+        try:
+            with open("obstacle_config.json", "r") as f:
+                data = json.load(f)
+                st.session_state.polygon_obstacles = data.get("obstacles", [])
+                st.session_state.flight_height = data.get("flight_height", 10)
+                st.session_state.safe_radius = data.get("safe_radius", 10)
+        except:
+            st.session_state.polygon_obstacles = []
+
+def save_current_config():
+    """保留旧的保存功能用于兼容"""
     config = {
         "save_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "flight_height": st.session_state.flight_height,
@@ -468,7 +543,7 @@ with map_col:
     
     output = st_folium(m, height=650, width="100%", key="map")
     
-    # 处理绘制
+    # 处理绘制：绘制完成后立即弹窗输入属性
     if output and output.get("last_active_drawing"):
         drawing = output["last_active_drawing"]
         if drawing and drawing.get("geometry"):
@@ -487,6 +562,7 @@ with map_col:
             
             if coords and st.session_state.temp_new_obstacle is None:
                 st.session_state.temp_new_obstacle = coords
+                st.session_state.pending_obstacle_props = {"name": f"障碍物{len(st.session_state.polygon_obstacles)+1}", "height": 40}
                 st.rerun()
 
 with monitor_col:
@@ -627,12 +703,17 @@ with control_col:
         st.rerun()
     
     st.divider()
-    st.markdown("### 障碍物管理")
+    st.markdown("### 障碍物与记忆管理")
     
+    # 新障碍物命名表单
     if st.session_state.temp_new_obstacle is not None:
-        st.warning("📌 检测到新绘制的区域，请设置高度")
-        new_obs_height = st.number_input("障碍物高度(米)", min_value=0, max_value=500, value=40, step=5, key="new_h")
-        new_obs_name = st.text_input("名称", value=f"障碍物{len(st.session_state.polygon_obstacles)+1}", key="new_n")
+        st.warning("📌 检测到新绘制的区域，请设置该障碍物属性")
+        default_name = f"障碍物{len(st.session_state.polygon_obstacles)+1}"
+        if st.session_state.pending_obstacle_props:
+            default_name = st.session_state.pending_obstacle_props.get("name", default_name)
+        
+        new_obs_name = st.text_input("障碍物名称", value=default_name, key="new_obs_name")
+        new_obs_height = st.number_input("障碍物高度(米)", min_value=0, max_value=500, value=40, step=5, key="new_obs_height")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -642,49 +723,72 @@ with control_col:
                     "coordinates": st.session_state.temp_new_obstacle,
                     "height": new_obs_height
                 })
-                save_obstacles()
                 st.session_state.temp_new_obstacle = None
+                st.session_state.pending_obstacle_props = None
+                st.session_state.active_memory = None  # 当前障碍物已不是来自某个记忆，因为被修改了
                 generate_waypoints()
                 st.success(f"已添加 {new_obs_name} (高度{new_obs_height}m)")
                 st.rerun()
         with col2:
             if st.button("❌ 取消", use_container_width=True):
                 st.session_state.temp_new_obstacle = None
+                st.session_state.pending_obstacle_props = None
                 st.rerun()
     else:
-        st.info("💡 在地图上绘制多边形/矩形/圆形，将自动识别并弹出高度设置")
+        st.info("💡 在地图上绘制多边形/矩形/圆形，将自动弹出属性设置窗口")
     
-    col_save, col_load = st.columns(2)
-    with col_save:
-        if st.button("💾 一键保存", use_container_width=True):
-            save_obstacles()
-            st.success("已保存配置")
-    with col_load:
-        if st.button("📂 加载记忆", use_container_width=True):
-            try:
-                with open("obstacle_config.json", "r") as f:
-                    config = json.load(f)
-                    st.session_state.polygon_obstacles = config.get("obstacles", [])
-                    st.session_state.flight_height = config.get("flight_height", 10)
-                    st.session_state.safe_radius = config.get("safe_radius", 10)
-                generate_waypoints()
-                st.success("已加载障碍物")
+    st.divider()
+    st.markdown("#### 📦 记忆管理")
+    
+    # 保存当前障碍物为记忆
+    with st.container():
+        memory_name_input = st.text_input("记忆名称", value=f"记忆{len(st.session_state.memories)+1}", key="memory_save_name")
+        col_save_mem, col_clear = st.columns(2)
+        with col_save_mem:
+            if st.button("💾 保存为记忆", use_container_width=True):
+                if st.session_state.polygon_obstacles:
+                    if save_current_obstacles_as_memory(memory_name_input):
+                        st.success(f"已保存为 {memory_name_input}")
+                        st.rerun()
+                    else:
+                        st.error("保存失败")
+                else:
+                    st.warning("当前没有障碍物可以保存")
+        with col_clear:
+            if st.button("🗑️ 清空地图", use_container_width=True):
+                clear_current_obstacles()
+                st.success("已清空地图上所有障碍物")
                 st.rerun()
-            except:
-                st.warning("未找到记忆文件")
     
-    if st.button("🗑️ 清理所有", use_container_width=True):
-        st.session_state.polygon_obstacles = []
-        st.session_state.waypoints = None
-        st.session_state.flight_monitor = None
-        try:
-            os.remove("obstacle_config.json")
-        except:
-            pass
-        generate_waypoints()
-        st.rerun()
+    # 加载记忆
+    if st.session_state.memories:
+        memory_options = list(st.session_state.memories.keys())
+        selected_memory = st.selectbox("选择要加载的记忆", memory_options, index=0 if memory_options else None)
+        
+        col_load, col_del = st.columns(2)
+        with col_load:
+            if st.button("📂 加载记忆", use_container_width=True):
+                if selected_memory:
+                    if load_memory_to_map(selected_memory):
+                        st.success(f"已加载 {selected_memory}")
+                        st.rerun()
+                    else:
+                        st.error("加载失败")
+        with col_del:
+            if st.button("❌ 删除记忆", use_container_width=True):
+                if selected_memory:
+                    if delete_memory(selected_memory):
+                        st.success(f"已删除 {selected_memory}")
+                        st.rerun()
+                    else:
+                        st.error("删除失败")
+    else:
+        st.info("暂无保存的记忆")
     
-    st.info(f"📂 障碍物数量: {len(st.session_state.polygon_obstacles)}")
+    st.divider()
+    st.info(f"📂 当前障碍物数量: {len(st.session_state.polygon_obstacles)}")
+    if st.session_state.active_memory:
+        st.success(f"当前加载的记忆: {st.session_state.active_memory}")
     
     with st.expander("📋 障碍物列表"):
         if st.session_state.polygon_obstacles:
