@@ -1,5 +1,7 @@
 streamlit
-pandas
-streamlit-autorefresh
 folium
 streamlit-folium
+pandas
+matplotlib
+streamlit-autorefresh
+coord-convert
