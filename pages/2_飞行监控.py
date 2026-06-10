@@ -6,6 +6,7 @@ from streamlit_autorefresh import st_autorefresh
 
 st.title("📡 飞行监控 - 无人机心跳监测")
 
+# 初始化心跳数据
 if 'heartbeat_data' not in st.session_state:
     st.session_state.heartbeat_data = []
 if 'last_heartbeat_time' not in st.session_state:
@@ -15,6 +16,7 @@ if 'next_seq' not in st.session_state:
 if 'offline_alert' not in st.session_state:
     st.session_state.offline_alert = False
 
+# 自动刷新页面（每秒）
 st_autorefresh(interval=1000, key="heartbeat_refresh")
 
 now = datetime.datetime.now()
@@ -66,4 +68,4 @@ with st.expander("📋 最近心跳记录"):
     if st.session_state.heartbeat_data:
         df_show = pd.DataFrame(st.session_state.heartbeat_data[-20:])
         df_show["time"] = df_show["time"].dt.strftime("%H:%M:%S")
-        st.dataframe(df_show.rename(columns={"seq":"序号","time":"时间"}), hide_index=True)
+        st.dataframe(df_show.rename(columns={"seq": "序号", "time": "时间"}), hide_index=True)
